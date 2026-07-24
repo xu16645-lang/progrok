@@ -1,4 +1,7 @@
 import argparse
+import email
+import html
+import imaplib
 import json
 import os
 import re
@@ -6,11 +9,15 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import traceback
 from functools import partial
 from datetime import datetime, timezone
+from email.header import decode_header
+from email.utils import parseaddr, parsedate_to_datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse, urlencode
 from urllib.request import Request, urlopen
 
@@ -70,6 +77,7 @@ TOKEN_ENDPOINTS = {
 IMAP_HOST = "outlook.office365.com"
 IMAP_PORT = 993
 REQUEST_TIMEOUT_SECONDS = 45
+IMAP_TIMEOUT_SECONDS = 20
 FETCH_LIMIT_DEFAULT = 5
 BASE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 ACCOUNT_LOG_PATH = os.path.join(BASE_DIR, "data", "account-run-history.txt")

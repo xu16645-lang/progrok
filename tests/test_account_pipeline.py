@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 from account_pipeline import (
     CHATGPT_SUB2API_MODELS,
     create_grok_oauth_in_sub2api,
+    import_grok_sso_to_sub2api,
     import_account,
     import_chatgpt_to_sub2api,
     import_to_sub2api,
@@ -379,6 +380,46 @@ class Sub2APIImportTests(unittest.TestCase):
         self.assertIn("callback?code=code-1", create_body["code"])
         self.assertNotIn("access_token", create_body)
         self.assertNotIn("refresh_token", create_body)
+
+    def test_grok_sso_import_uses_native_sub2api_endpoint_and_group(self):
+        requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(
+                200,
+                json={
+                    "data": {
+                        "created": [
+                            {
+                                "email": "grok@example.com",
+                                "account": {"id": 91, "name": "grok@example.com"},
+                            }
+                        ],
+                        "failed": [],
+                    }
+                },
+                request=request,
+            )
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            result = import_grok_sso_to_sub2api(
+                sso_token="signed-sso",
+                email="grok@example.com",
+                base_url="https://sub2.example.test",
+                auth_mode="api_key",
+                api_key="admin-key",
+                group_id=20,
+                client=client,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["account_id"], 91)
+        self.assertEqual(result["path"], "grok_sso_to_oauth")
+        self.assertEqual(requests[0].url.path, "/api/v1/admin/grok/sso-to-oauth")
+        body = json.loads(requests[0].content)
+        self.assertEqual(body["sso_token"], "signed-sso")
+        self.assertEqual(body["group_ids"], [20])
 
     def test_callback_imported_grok_probe_uses_sub2api_account_test(self):
         requests = []

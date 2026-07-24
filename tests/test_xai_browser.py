@@ -15,7 +15,6 @@ import grok_build_adapter as grok_adapter
 import sso_to_auth_json
 from grok_build_adapter import _make_email_receiver, _snapshot_reg_config
 from xai_browser import (
-    PASSWORD_SUBMIT_DELAY_MS,
     XAI_GROK_URL,
     XAI_SIGNUP_URL,
     XaiBrowserRuntime,
@@ -95,15 +94,20 @@ class XaiBrowserTests(unittest.TestCase):
         self.assertEqual(generated, ("Aiden", "Carter"))
         self.assertNotEqual(generated, ("User", "Grok"))
 
-    def test_profile_is_filled_before_password_and_submit_waits_five_seconds(self):
+    def test_profile_and_password_are_filled_before_verification_and_submit(self):
         events = []
 
         class _Input:
             def __init__(self, name):
                 self.name = name
+                self.value = ""
 
             def fill(self, value):
+                self.value = value
                 events.append(("fill", self.name, value))
+
+            def input_value(self, **_kwargs):
+                return self.value
 
         visual = XaiVisibleRegistration(on_progress=lambda _message: None)
         visual.page = _Page()
@@ -123,6 +127,11 @@ class XaiBrowserTests(unittest.TestCase):
             patch.object(visual, "_verification_target", return_value=None),
             patch.object(visual, "_raise_page_error"),
             patch.object(visual, "_action_delay"),
+            patch.object(
+                visual,
+                "_wait_for_turnstile",
+                side_effect=lambda: events.append(("turnstile",)),
+            ),
             patch.object(visual, "_wait", side_effect=lambda ms: events.append(("wait", ms))),
             patch.object(visual, "_settle_page", side_effect=lambda: events.append(("settle",))),
             patch.object(visual, "_submit", side_effect=lambda *_args: events.append(("submit",))),
@@ -136,11 +145,42 @@ class XaiBrowserTests(unittest.TestCase):
         fill_names = [event[1] for event in events if event[0] == "fill"]
         self.assertEqual(fill_names, ["first", "last", "password"])
         password_fill = events.index(("fill", "password", "random-password"))
-        wait = events.index(("wait", PASSWORD_SUBMIT_DELAY_MS))
+        verification = events.index(("turnstile",))
         submit = events.index(("submit",))
-        self.assertLess(password_fill, wait)
-        self.assertLess(wait, submit)
+        self.assertLess(password_fill, verification)
+        self.assertLess(verification, submit)
         self.assertTrue(result["ok"])
+
+    def test_turnstile_absent_continues_without_waiting(self):
+        events = []
+        visual = XaiVisibleRegistration(on_progress=events.append)
+        visual.page = _Page()
+        with (
+            patch.object(visual, "_turnstile_status", return_value="absent"),
+            patch.object(visual, "_wait") as wait,
+        ):
+            visual._wait_for_turnstile()
+
+        wait.assert_not_called()
+        self.assertTrue(any("human_verification: not_required" in x for x in events))
+
+    def test_turnstile_pending_waits_until_passed(self):
+        events = []
+        visual = XaiVisibleRegistration(headless=False, on_progress=events.append)
+        visual.page = _Page()
+        with (
+            patch.object(
+                visual,
+                "_turnstile_status",
+                side_effect=["pending", "pending", "passed"],
+            ),
+            patch.object(visual, "_wait") as wait,
+        ):
+            visual._wait_for_turnstile()
+
+        wait.assert_called_once_with(250)
+        self.assertTrue(any("waiting_for_manual_action" in x for x in events))
+        self.assertTrue(any("human_verification: passed" in x for x in events))
 
     def test_sub2_oauth_callback_requires_matching_state(self):
         callback = "http://127.0.0.1:56121/callback?code=code-1&state=state-1"

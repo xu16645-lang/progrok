@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import os
 import socket
+import sys
 from io import BytesIO
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
@@ -16,6 +17,22 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+
+
+def _configure_console_encoding() -> None:
+    """Keep background-worker diagnostics from failing on Windows code pages."""
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        reconfigure = getattr(stream, "reconfigure", None)
+        if not callable(reconfigure):
+            continue
+        try:
+            reconfigure(encoding="utf-8", errors="backslashreplace")
+        except (OSError, ValueError):
+            pass
+
+
+_configure_console_encoding()
 
 from app_context import AppContext
 from export_formats import (
@@ -449,6 +466,11 @@ def hotmail_set_status(
 @app.delete("/api/mail/hotmail/accounts/used")
 def hotmail_delete_used() -> dict[str, Any]:
     return _app_routes.hotmail_delete_used(_app_context())
+
+
+@app.delete("/api/mail/hotmail/accounts/unhealthy")
+def hotmail_delete_unhealthy() -> dict[str, Any]:
+    return _app_routes.hotmail_delete_unhealthy(_app_context())
 
 
 @app.delete("/api/mail/hotmail/accounts/{account_id}")

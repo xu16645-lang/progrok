@@ -38,6 +38,7 @@ ACTIVE_SESSION_STATUSES = {
     "profile",
     "completion",
     "fetching_sso",
+    "authorizing",
     "converting",
     "probing",
     "probe_queued",

@@ -552,15 +552,15 @@ def _sso_to_token_locked(
                     retryable=False,
                 )
             else:
-                log("  ✅ sso 有效")
+                log("  [ok] sso 有效")
                 break
         except Exception as e:  # noqa: BLE001
-            log(f"  ❌ SSO 校验网络错误: {e}")
+            log(f"  [error] SSO 校验网络错误: {e}")
             _record_failure(validation_failure, stage="sso_validation", detail=e)
 
         _copy_failure(failure, validation_failure)
         if validation_attempt < retries and validation_failure.get("retryable"):
-            log("  ⏳ SSO 校验临时失败，稍后重试")
+            log("  [wait] SSO 校验临时失败，稍后重试")
             _sleep_interruptibly(
                 _device_flow_backoff_sec(validation_attempt), should_cancel
             )
@@ -570,7 +570,7 @@ def _sso_to_token_locked(
     for attempt in range(1, retries + 1):
         _raise_if_cancelled(should_cancel)
         attempt_failure: dict[str, Any] = {}
-        log(f"  🔑 Device Flow... (try {attempt}/{retries})")
+        log(f"  [auth] Device Flow... (try {attempt}/{retries})")
         # The outer loop owns full-flow retries. One device/code request per
         # attempt avoids multiplying 429 traffic (3 inner x 3 outer retries).
         dc = request_device_code(
@@ -599,7 +599,7 @@ def _sso_to_token_locked(
             )
             _copy_failure(failure, attempt_failure)
             return None
-        log(f"  📋 user_code: {user_code}")
+        log(f"  [code] user_code: {user_code}")
 
         try:
             _raise_if_cancelled(should_cancel)
@@ -638,11 +638,11 @@ def _sso_to_token_locked(
                         status=verify_status,
                     )
         except Exception as e:  # noqa: BLE001
-            log(f"  ❌ verify 异常: {e}")
+            log(f"  [error] verify 异常: {e}")
             _record_failure(attempt_failure, stage="verify", detail=e)
 
         if attempt_failure:
-            log(f"  ❌ verify 失败: {attempt_failure.get('detail')}")
+            log(f"  [error] verify 失败: {attempt_failure.get('detail')}")
             _copy_failure(failure, attempt_failure)
             if _retry_device_flow(
                 log, attempt, retries, attempt_failure, should_cancel
@@ -676,13 +676,13 @@ def _sso_to_token_locked(
                     status=approve_status,
                 )
             else:
-                log("  ✅ 授权确认")
+                log("  [ok] 授权确认")
         except Exception as e:  # noqa: BLE001
-            log(f"  ❌ approve 异常: {e}")
+            log(f"  [error] approve 异常: {e}")
             _record_failure(attempt_failure, stage="approve", detail=e)
 
         if attempt_failure:
-            log(f"  ❌ approve 失败: {attempt_failure.get('detail')}")
+            log(f"  [error] approve 失败: {attempt_failure.get('detail')}")
             _copy_failure(failure, attempt_failure)
             if _retry_device_flow(
                 log, attempt, retries, attempt_failure, should_cancel
@@ -711,7 +711,7 @@ def _sso_to_token_locked(
         if failure is not None:
             failure.clear()
         log(
-            f"  ✅ access_token (expires_in={token.get('expires_in')}s)"
+            f"  [ok] access_token (expires_in={token.get('expires_in')}s)"
             + (" + refresh_token" if token.get("refresh_token") else "")
         )
         return token

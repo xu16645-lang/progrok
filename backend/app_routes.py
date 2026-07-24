@@ -122,6 +122,13 @@ def hotmail_delete_used(ctx):
     return {"ok": True, **result, "pool": list_accounts()}
 
 
+def hotmail_delete_unhealthy(ctx):
+    from hotmail_local import delete_unhealthy_accounts, list_accounts
+
+    result = delete_unhealthy_accounts()
+    return {"ok": True, **result, "pool": list_accounts()}
+
+
 def hotmail_delete(ctx, account_id):
     from hotmail_local import delete_account, list_accounts
 

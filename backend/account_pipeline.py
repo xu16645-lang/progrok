@@ -30,6 +30,7 @@ _sub2api_auth_headers = _sub2api._sub2api_auth_headers
 _chatgpt_agent_identity = _sub2api._chatgpt_agent_identity
 _find_sub2api_account = _sub2api._find_sub2api_account
 create_grok_oauth_in_sub2api = _sub2api.create_grok_oauth_in_sub2api
+import_grok_sso_to_sub2api = _sub2api.import_grok_sso_to_sub2api
 probe_grok_account_in_sub2api = _sub2api.probe_grok_account_in_sub2api
 
 

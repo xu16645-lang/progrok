@@ -282,6 +282,27 @@ def delete_used_accounts() -> dict[str, int]:
         return {"deleted": deleted, "skipped_reserved": skipped_reserved}
 
 
+def delete_unhealthy_accounts() -> dict[str, int]:
+    """Delete accounts whose latest mailbox probe failed."""
+    with _lock:
+        accounts = _load()
+        kept: list[dict[str, Any]] = []
+        deleted = 0
+        skipped_reserved = 0
+        for item in accounts:
+            account_id = str(item.get("id") or "")
+            unhealthy = item.get("mail_healthy") is False
+            if unhealthy and account_id not in _reservations:
+                deleted += 1
+                continue
+            if unhealthy and account_id in _reservations:
+                skipped_reserved += 1
+            kept.append(item)
+        if deleted:
+            _save(kept)
+        return {"deleted": deleted, "skipped_reserved": skipped_reserved}
+
+
 def _request_json(base_url: str, path: str, payload: dict[str, Any] | None = None, timeout: float = 12) -> dict[str, Any]:
     url = f"{str(base_url or DEFAULT_HELPER_URL).rstrip('/')}{path}"
     data = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -291,6 +312,11 @@ def _request_json(base_url: str, path: str, payload: dict[str, Any] | None = Non
             body = json.loads(response.read().decode("utf-8", errors="replace") or "{}")
     except HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="replace")
+        if exc.code == 401 or any(
+            marker in detail.lower()
+            for marker in ("invalid_grant", "aadsts70000", "unauthorized")
+        ):
+            raise RuntimeError(f"微软邮箱凭证失效：{detail[:260]}") from exc
         raise RuntimeError(f"本地邮箱助手 HTTP {exc.code}: {detail[:200]}") from exc
     except (URLError, OSError) as exc:
         raise RuntimeError(f"无法连接本地邮箱助手 {url}: {exc}") from exc

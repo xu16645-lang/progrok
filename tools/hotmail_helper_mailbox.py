@@ -119,7 +119,9 @@ def build_xoauth2(ctx: MailboxContext, email_addr, access_token):
 
 def open_mailbox(ctx: MailboxContext, email_addr, access_token):
     client = ctx.imaplib.IMAP4_SSL(
-        ctx.IMAP_HOST, ctx.IMAP_PORT, timeout=ctx.REQUEST_TIMEOUT_SECONDS
+        ctx.IMAP_HOST,
+        ctx.IMAP_PORT,
+        timeout=getattr(ctx, "IMAP_TIMEOUT_SECONDS", ctx.REQUEST_TIMEOUT_SECONDS),
     )
     client.authenticate(
         "XOAUTH2", lambda _: ctx.build_xoauth2(email_addr, access_token)
@@ -514,6 +516,8 @@ def collect_messages(
     ctx: MailboxContext, email_addr, client_id, refresh_token, mailboxes, top
 ):
     errors = []
+    # IMAP is the authoritative mailbox transport for these delegated tokens.
+    # Keep its socket timeout bounded, then use API transports as fallbacks.
     collectors = [
         ("imap", ctx.collect_imap_messages),
         ("graph", ctx.collect_graph_messages),
@@ -557,10 +561,13 @@ def extract_code(ctx: MailboxContext, text, code_patterns=None):
             if not match:
                 continue
             if match.lastindex:
-                for group_index in range(1, match.lastindex + 1):
-                    candidate = str(match.group(group_index) or "").strip()
-                    if candidate:
-                        return candidate
+                groups = [
+                    str(match.group(group_index) or "").strip()
+                    for group_index in range(1, match.lastindex + 1)
+                ]
+                candidate = "".join(group for group in groups if group)
+                if candidate:
+                    return candidate
             candidate = str(match.group(0) or "").strip()
             if candidate:
                 return candidate

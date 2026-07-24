@@ -117,6 +117,8 @@ def list_registration_sessions() -> dict[str, Any]:
                 ):
                     stats["batch_status"] = "cancelled"
             item = {**batch, **stats}
+            item["ok_count"] = int(stats.get("imported") or 0)
+            item["fail_count"] = int(stats.get("error") or 0)
             item.pop("reg_config", None)
             batch_status = str(stats.get("batch_status") or "").lower()
             current_status = str(batch.get("status") or "").lower()
@@ -340,7 +342,13 @@ def get_registration_batch(batch_id: str) -> dict[str, Any] | None:
         )
     except Exception:
         pass
-    out = {**batch, **stats, "sessions": sessions}
+    out = {
+        **batch,
+        **stats,
+        "ok_count": int(stats.get("imported") or 0),
+        "fail_count": int(stats.get("error") or 0),
+        "sessions": sessions,
+    }
     out.pop("reg_config", None)
     if stats.get("batch_status"):
         if str(batch.get("status") or "").lower() != "stopping" or stats.get("running", 0) == 0:

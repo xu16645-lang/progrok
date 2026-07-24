@@ -10,7 +10,7 @@ from urllib.parse import parse_qs, urlparse
 
 XAI_SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
 XAI_GROK_URL = "https://grok.com/"
-PASSWORD_SUBMIT_DELAY_MS = 5_000
+TURNSTILE_WAIT_SEC = 90.0
 PAGE_SETTLE_DELAY_MS = 600
 REGISTRATION_LANDING_TIMEOUT_SEC = 60.0
 
@@ -401,6 +401,85 @@ class XaiVisibleRegistration:
         )
         return ("single", target) if target is not None else None
 
+    def _turnstile_status(self) -> str:
+        """Return absent, pending, or passed for the currently rendered widget."""
+        if self.page is None:
+            return "absent"
+        seen = False
+        try:
+            responses = self.page.locator(
+                'input[name="cf-turnstile-response"], '
+                'textarea[name="cf-turnstile-response"]'
+            )
+            seen = int(responses.count()) > 0
+            for index in range(min(5, int(responses.count()))):
+                value = str(
+                    responses.nth(index).input_value(timeout=500) or ""
+                ).strip()
+                if len(value) >= 20:
+                    return "passed"
+        except Exception:
+            pass
+        try:
+            frames = self.page.locator('iframe[src*="challenges.cloudflare.com"]')
+            for index in range(min(5, int(frames.count()))):
+                frame = frames.nth(index)
+                if frame.is_visible():
+                    seen = True
+        except Exception:
+            pass
+        try:
+            for frame in self.page.frames:
+                if "challenges.cloudflare.com" not in str(frame.url or ""):
+                    continue
+                seen = True
+                text = str(frame.locator("body").inner_text(timeout=500) or "")
+                if re.search(r"success|验证成功", text, re.I):
+                    return "passed"
+        except Exception:
+            pass
+        return "pending" if seen else "absent"
+
+    def _wait_for_turnstile(self) -> None:
+        """Continue immediately when absent, otherwise wait for automatic/manual pass."""
+        status = self._turnstile_status()
+        if status == "absent":
+            self._progress("human_verification", "not_required")
+            return
+        if status == "passed":
+            self._progress("human_verification", "passed")
+            return
+
+        self._progress("human_verification", "detected")
+        if not self.headless and self.page is not None:
+            try:
+                self.page.bring_to_front()
+            except Exception:
+                pass
+            self._progress("human_verification", "waiting_for_manual_action")
+        deadline = min(self.deadline, time.time() + TURNSTILE_WAIT_SEC)
+        while time.time() < deadline:
+            self._check_cancel()
+            status = self._turnstile_status()
+            if status == "passed":
+                self._progress("human_verification", "passed")
+                return
+            self._wait(250)
+        if self.headless:
+            raise XaiBrowserError(
+                "xAI 人机验证未自动通过；请开启“显示注册浏览器”后手工完成验证"
+            )
+        raise XaiBrowserError("等待手工完成人机验证超时")
+
+    @staticmethod
+    def _input_has_value(target: Any | None) -> bool:
+        if target is None:
+            return False
+        try:
+            return bool(str(target.input_value(timeout=500) or ""))
+        except Exception:
+            return False
+
     def _extract_sso(self) -> tuple[str | None, dict[str, str]]:
         if self.context is None:
             return None, {}
@@ -598,7 +677,6 @@ class XaiVisibleRegistration:
                         full_name.fill(f"{first_name_value} {last_name_value}")
                         anchor = full_name
                     self._progress("profile", "filled")
-            password_was_filled = False
             if password_input is not None:
                 stage_parts.append("password")
                 if "password" not in acted:
@@ -606,14 +684,24 @@ class XaiVisibleRegistration:
                     self._action_delay()
                     password_input.fill(password)
                     anchor = password_input
-                    password_was_filled = True
                     self._progress("password", "filled")
 
             pending = [part for part in stage_parts if part not in acted]
             if pending:
-                if password_was_filled:
-                    self._progress("password", "waiting_before_submit")
-                    self._wait(PASSWORD_SUBMIT_DELAY_MS)
+                if password_input is not None:
+                    # The profile form may re-render while Turnstile finishes and
+                    # clear React-controlled inputs. Re-check the actual DOM value
+                    # before and after verification instead of sleeping blindly.
+                    for attempt in range(2):
+                        if not self._input_has_value(password_input):
+                            self._progress("password", "refilling_after_render")
+                            password_input.fill(password)
+                            anchor = password_input
+                        self._wait_for_turnstile()
+                        if self._input_has_value(password_input):
+                            break
+                        if attempt == 1:
+                            raise XaiBrowserError("xAI 页面反复重绘并清空密码输入框")
                 self._submit(
                     anchor,
                     "complete sign up|continue|next|sign up|create account|submit|继续|下一步|创建",

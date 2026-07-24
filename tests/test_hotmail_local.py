@@ -6,7 +6,9 @@ import tempfile
 import threading
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from io import BytesIO
 from pathlib import Path
+from urllib.error import HTTPError, URLError
 from unittest.mock import patch
 
 
@@ -171,6 +173,69 @@ class HotmailLocalTests(unittest.TestCase):
         self.assertEqual(strict["code"], "")
         self.assertEqual(compatible["code"], "938841")
         self.assertTrue(compatible["usedTimeFallback"])
+
+    def test_helper_joins_multi_group_xai_verification_code(self):
+        code = hotmail_helper.extract_code(
+            "SpaceXAI confirmation code: RBX-7KI",
+            code_patterns=[
+                {
+                    "source": r"\b([A-Z0-9]{3})-([A-Z0-9]{3})\b",
+                    "flags": "i",
+                }
+            ],
+        )
+
+        self.assertEqual(code, "RBX7KI")
+
+    def test_helper_refresh_token_has_runtime_clock_dependency(self):
+        with patch.object(
+            hotmail_helper,
+            "post_form",
+            return_value={"access_token": "access-token"},
+        ):
+            result = hotmail_helper.refresh_access_token(
+                "client-id",
+                "refresh-token",
+                strategy_names=["live"],
+            )
+
+        self.assertEqual(result["access_token"], "access-token")
+        self.assertEqual(result["token_endpoint"], "live")
+
+    def test_helper_refresh_token_preserves_http_error_details(self):
+        error = HTTPError(
+            "https://login.live.com/oauth20_token.srf",
+            400,
+            "Bad Request",
+            hdrs=None,
+            fp=BytesIO(b'{"error":"invalid_grant"}'),
+        )
+        with patch.object(hotmail_helper, "post_form", side_effect=error):
+            result = hotmail_helper.try_refresh_access_token(
+                hotmail_helper.TOKEN_ENDPOINTS["live"],
+                "client-id",
+                "refresh-token",
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["status"], 400)
+        self.assertIn("invalid_grant", result["error"])
+
+    def test_helper_refresh_token_preserves_network_error_details(self):
+        with patch.object(
+            hotmail_helper,
+            "post_form",
+            side_effect=URLError("connection failed"),
+        ):
+            result = hotmail_helper.try_refresh_access_token(
+                hotmail_helper.TOKEN_ENDPOINTS["live"],
+                "client-id",
+                "refresh-token",
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertIsNone(result["status"])
+        self.assertIn("connection failed", result["error"])
 
     def test_probe_account_updates_health_and_rotates_token(self):
         result = hotmail_local.import_accounts("a@outlook.com----p----client-a----token-a")

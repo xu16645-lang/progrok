@@ -34,7 +34,7 @@ def request_device_code(
                 body = (getattr(response, "text", None) or "")[:300]
                 if status >= 400:
                     detail = f"HTTP {status}: {body[:200]}"
-                    print(f"  ❌ device/code {detail}")
+                    print(f"  [error] device/code {detail}")
                     ctx._record_failure(
                         failure,
                         stage="device_code",
@@ -60,7 +60,7 @@ def request_device_code(
                 return None
             except Exception as exc:  # noqa: BLE001
                 ctx._raise_if_cancelled(should_cancel)
-                print(f"  ❌ device/code: {exc}")
+                print(f"  [error] device/code: {exc}")
                 ctx._record_failure(failure, stage="device_code", detail=exc)
                 if attempt < attempts and ctx._is_retryable_network_error(exc):
                     ctx._sleep_interruptibly(
@@ -92,7 +92,7 @@ def request_device_code(
         except ctx.urllib.error.HTTPError as exc:
             body = exc.read().decode()[:300]
             detail = f"HTTP {exc.code}: {body[:200]}"
-            print(f"  ❌ device/code {detail}")
+            print(f"  [error] device/code {detail}")
             ctx._record_failure(
                 failure,
                 stage="device_code",
@@ -107,7 +107,7 @@ def request_device_code(
             return None
         except Exception as exc:  # noqa: BLE001
             ctx._raise_if_cancelled(should_cancel)
-            print(f"  ❌ device/code: {exc}")
+            print(f"  [error] device/code: {exc}")
             ctx._record_failure(failure, stage="device_code", detail=exc)
             if attempt < attempts and ctx._is_retryable_network_error(exc):
                 ctx._sleep_interruptibly(
@@ -185,7 +185,7 @@ def poll_token(
                 if error == "slow_down":
                     interval_seconds = min(10.0, interval_seconds + 1.0)
                     continue
-                print(f"  ❌ token: {detail}")
+                print(f"  [error] token: {detail}")
                 ctx._record_failure(
                     failure,
                     stage="token_poll",
@@ -196,7 +196,7 @@ def poll_token(
             except Exception as exc:  # noqa: BLE001
                 last_detail = f"network error: {exc}"
                 if ctx.time.time() >= deadline:
-                    print(f"  ❌ token network: {exc}")
+                    print(f"  [error] token network: {exc}")
                     ctx._record_failure(
                         failure,
                         stage="token_poll",
@@ -239,7 +239,7 @@ def poll_token(
             if error == "slow_down":
                 interval_seconds = min(10.0, interval_seconds + 1.0)
                 continue
-            print(f"  ❌ token: {detail}")
+            print(f"  [error] token: {detail}")
             ctx._record_failure(
                 failure,
                 stage="token_poll",
@@ -250,7 +250,7 @@ def poll_token(
         except Exception as exc:  # noqa: BLE001
             last_detail = f"network error: {exc}"
             if ctx.time.time() >= deadline:
-                print(f"  ❌ token network: {exc}")
+                print(f"  [error] token network: {exc}")
                 ctx._record_failure(
                     failure,
                     stage="token_poll",
@@ -259,7 +259,7 @@ def poll_token(
                 return None
             continue
     detail = last_detail or "device authorization polling timed out"
-    print(f"  ❌ 轮询超时: {detail}")
+    print(f"  [error] 轮询超时: {detail}")
     ctx._record_failure(
         failure,
         stage="token_poll",
