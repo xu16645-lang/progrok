@@ -76,7 +76,6 @@ class XaiBrowserRuntime:
                 options["window"] = (width, height)
             if proxy and proxy.get("server"):
                 options["proxy"] = proxy
-                options["geoip"] = True
             self.camoufox_manager = Camoufox(**options)
             self.browser = self.camoufox_manager.start()
             self.using_camoufox = True
