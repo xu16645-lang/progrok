@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>ProGrok 协议注册 — Grok / ChatGPT</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/static/style.css?v=20260723-rotation-layout-1">
+</head>
+<body>
+  <main>
+    <header>
+      <div>
+        <p class="eyebrow">STANDALONE REGISTRATION</p>
+        <div class="title-line">
+          <h1>ProGrok 协议注册</h1>
+        </div>
+        <p class="subtitle">独立运行 · 本地保存 · 无需 PostgreSQL</p>
+      </div>
+      <div class="header-actions">
+        <div class="path-control">
+          <button type="button" id="paths-button" class="path-button">注册文件路径</button>
+          <div id="paths-popover" class="paths-popover" hidden>
+            <div class="paths-head"><strong>注册文件保存位置</strong><button type="button" id="paths-close" class="paths-close" aria-label="关闭">×</button></div>
+            <div id="paths-list" class="paths-list"><div class="paths-loading">正在读取路径…</div></div>
+          </div>
+        </div>
+        <div class="download-control">
+          <button type="button" id="download-button" class="path-button">账号下载</button>
+          <div id="download-popover" class="paths-popover download-popover" hidden>
+            <div class="paths-head"><strong>账号下载</strong><button type="button" id="download-close" class="paths-close" aria-label="关闭">×</button></div>
+            <div class="download-bar">
+              <label>下载格式<select id="download-format"><option value="pure_sso">纯 SSO</option><option value="cookie">sso=...</option><option value="email_sso">邮箱 + SSO</option><option value="email_password_sso">邮箱:密码:SSO</option><option value="json">普通 JSON（邮箱 + 密码）</option><option value="cpa_json" selected>CPA JSON</option><option value="sub2api_json">Sub2API JSON</option><option value="chatgpt_auth_json">ChatGPT Agent Identity auth.json</option></select></label>
+              <label>下载范围<select id="download-batch"><option value="">全部成功账号</option></select></label>
+              <button type="button" id="download-accounts" class="download-button">下载账号</button>
+            </div>
+          </div>
+        </div>
+        <div id="health" class="badge">检查服务…</div>
+      </div>
+    </header>
+
+    <nav class="module-nav" aria-label="配置模块">
+      <button type="button" class="module-nav-button active" data-config-tab="registration" aria-selected="true">注册配置</button>
+      <button type="button" class="module-nav-button" data-config-tab="mail" aria-selected="false">邮箱配置</button>
+      <button type="button" class="module-nav-button" data-config-tab="proxy" aria-selected="false">代理配置</button>
+      <button type="button" class="module-nav-button" data-config-tab="import" aria-selected="false">自动导入配置</button>
+      <button type="button" class="module-nav-button" data-config-tab="probe" aria-selected="false">测活配置</button>
+      <button type="button" class="module-nav-button" data-config-tab="rotation" aria-selected="false">账号轮询</button>
+    </nav>
+
+    <div class="workspace">
+    <section class="panel config-panel">
+      <div class="config-toolbar">
+        <div class="config-toolbar-title">注册配置</div>
+        <div class="actions">
+          <label class="toolbar-format">默认注册 JSON<select name="registration_json_format" form="config-form"><option value="cpa">CPA JSON</option><option value="sub2api">Sub2API JSON</option></select></label>
+          <button type="button" id="save" class="secondary">保存配置</button>
+          <button type="button" id="pause-current" class="pause-current" disabled>暂停注册</button>
+          <button type="submit" id="start" form="config-form">开始注册</button>
+        </div>
+      </div>
+      <div class="config-scroll">
+      <form id="config-form">
+        <section class="config-module active" data-config-module="registration">
+        <div class="primary-setting">
+          <label>注册目标<select name="registration_target" id="registration-target-select"><option value="grok">Grok (xAI)</option><option value="chatgpt">ChatGPT (OpenAI)</option></select></label>
+          <label><span id="registration-count-label">注册数量</span><input name="count" type="number" min="1" max="10000"></label>
+          <label><span id="registration-concurrency-label">并发数</span><input name="concurrency" type="number" min="1" max="10"></label>
+          <label data-target="grok">错峰毫秒<input name="stagger_ms" type="number" min="0" max="60000"></label>
+          <label data-target="chatgpt" hidden>步骤操作延迟毫秒<input name="chatgpt_step_delay_ms" type="number" min="0" max="30000" value="3000"></label>
+          <label class="tune-toggle" data-target="grok"><span>自动调优错峰</span><input name="auto_tune_enabled" type="checkbox"></label>
+          <label class="tune-toggle" data-target="chatgpt" hidden title="开启后注册时会弹出浏览器窗口，便于观察失败页面"><span>显示注册浏览器（调试）</span><input id="chatgpt-browser-visible" type="checkbox"></label>
+          <div id="performance-profile" class="performance-profile wide">正在评估本机性能…</div>
+        </div>
+        <div class="section-title" data-target="grok"><span>A</span> 验证码与过盾</div>
+        <div class="grid" data-target="grok">
+          <label>Captcha<select name="captcha_provider"><option value="local">本地 Turnstile Solver</option><option value="yescaptcha">YesCaptcha</option></select></label>
+          <label><span class="field-label">本地 Solver <span id="solver-state" class="detect-state">检测中…</span></span><div class="input-action"><input name="local_solver_url" placeholder="正在自动检测" readonly><button type="button" id="detect-solver" class="inline-button">重新检测</button></div></label>
+          <label>YesCaptcha Key<input name="yescaptcha_key" type="password" autocomplete="off"></label>
+        </div>
+        </section>
+
+        <section class="config-module" data-config-module="mail" hidden>
+        <div class="section-title"><span>A</span> 邮箱服务</div>
+        <div class="grid">
+            <label>邮箱类型<select name="mail_provider"><option value="yyds">YYDS Mail</option><option value="custom">自定义（Cloudflare 邮箱）</option><option value="stalwart">Stalwart 域名邮箱</option><option value="hotmail_local">微软邮箱账户池（本地助手）</option></select></label>
+            <label data-mail-standard>API 地址<input name="mail_base_url" placeholder="YYDS 或自建邮箱 API 地址"></label>
+            <label data-mail-standard>API Key / 管理员密钥<input name="mail_api_key" type="password" autocomplete="off"></label>
+          <label data-mail-standard>邮箱域名<input name="mail_domain" placeholder="可留空自动选择"></label>
+          <label data-mail-standard>邮箱前缀<input value="自动随机（每个账号不同）" disabled></label>
+          <div id="hotmail-local-panel" class="hotmail-panel wide" hidden>
+            <div class="hotmail-helper-row">
+              <label><span class="field-label">本地助手地址 <span id="hotmail-helper-state" class="detect-state">未检测</span></span><input name="hotmail_local_base_url" placeholder="http://127.0.0.1:17373"></label>
+              <button type="button" id="test-hotmail-helper" class="inline-button">检测助手</button>
+            </div>
+            <label>批量导入微软邮箱账号<textarea id="hotmail-import-text" rows="5" placeholder="email----password----client-id----refresh-token&#10;每行一个账号"></textarea></label>
+            <div class="hotmail-pool-head"><span id="hotmail-pool-summary">账户池：正在读取…</span><div class="hotmail-pool-actions"><button type="button" id="delete-used-hotmail-accounts" class="inline-button danger-button">删除已用</button><button type="button" id="probe-hotmail-accounts" class="inline-button">全部重新测活</button><button type="button" id="import-hotmail-accounts" class="inline-button">导入并自动测活</button></div></div>
+            <div id="hotmail-account-list" class="hotmail-account-list"><div class="empty">尚未导入微软邮箱账号</div></div>
+          </div>
+        </div>
+        </section>
+
+        <section class="config-module" data-config-module="proxy" hidden>
+        <div class="section-title"><span>A</span> 代理与轮换</div>
+        <div class="grid">
+          <label class="wide"><span class="field-label proxy-field-label">代理池<button type="button" id="detect-proxy" class="inline-button">检测本机代理</button></span><textarea name="proxy" rows="4" placeholder="每行一个代理；留空时自动检测本机代理"></textarea></label>
+          <label>代理用户名<input name="proxy_username"></label>
+          <label>代理密码<input name="proxy_password" type="password" autocomplete="off"></label>
+          <label>轮换策略<select name="proxy_strategy"><option value="round_robin">轮询</option><option value="random">随机</option><option value="sticky">固定</option></select></label>
+        </div>
+        </section>
+
+        <section class="config-module" data-config-module="import" hidden>
+        <div class="section-title"><span>A</span> 导入目标</div>
+        <div class="grid">
+          <label>导入并发数<input name="import_concurrency" type="number" min="1" max="10"></label>
+          <label>导入错峰毫秒<input name="import_stagger_ms" type="number" min="0" max="60000"></label>
+          <label>自动导入<select name="auto_import_enabled"><option value="false">关闭</option><option value="true">开启</option></select></label>
+          <label>导入对象<select name="auto_import_target"><option value="sub2api">Sub2API</option><option value="cpa">CPA</option></select></label>
+          <label data-import-target="sub2api">Sub2API 地址<input name="sub2api_base_url" placeholder="https://sub2.example.com"></label>
+          <label data-import-target="sub2api">Sub2API 认证方式<select name="sub2api_auth_mode"><option value="password">管理员邮箱 + 密码</option><option value="api_key">管理员 API Key</option></select></label>
+          <label data-import-target="sub2api" data-sub2-auth="password">Sub2API 管理员邮箱<input name="sub2api_admin_email" type="email" autocomplete="off"></label>
+          <label data-import-target="sub2api" data-sub2-auth="password">Sub2API 管理员密码<input name="sub2api_admin_password" type="password" autocomplete="off"></label>
+          <label data-import-target="sub2api" data-sub2-auth="api_key" hidden>Sub2API 管理员 API Key<input name="sub2api_api_key" type="password" autocomplete="off"></label>
+          <div class="sub2api-import-card" data-import-target="sub2api" data-chatgpt-only hidden>
+            <div><span>ChatGPT 导入模式</span><strong id="sub2api-import-mode">Agent Identity auth.json</strong></div>
+            <small>使用最新版 Sub2API Codex Session 导入接口，不上传 Access Token 或 Refresh Token。</small>
+          </div>
+          <div class="sub2api-group-field" data-import-target="sub2api" data-chatgpt-only hidden>
+            <label>导入后绑定分组<select name="sub2api_group_id"><option value="0">使用 Sub2API 默认分组</option></select></label>
+            <input name="sub2api_group_name" type="hidden">
+            <button type="button" id="load-sub2api-chatgpt-groups" class="inline-button">自动获取分组</button>
+            <small id="sub2api-group-state">填写站点地址和认证信息后获取 Sub2API 全部分组</small>
+          </div>
+          <div class="sub2api-group-field" data-import-target="sub2api" data-grok-only hidden>
+            <label>导入后绑定分组<select name="sub2api_xai_group_id"><option value="0">使用 Sub2API 默认分组</option></select></label>
+            <input name="sub2api_xai_group_name" type="hidden">
+            <button type="button" id="load-sub2api-xai-groups" class="inline-button">自动获取分组</button>
+            <small id="sub2api-xai-group-state">填写站点地址和认证信息后获取 Sub2API 全部分组</small>
+          </div>
+          <div class="sub2api-models" data-import-target="sub2api" data-chatgpt-only hidden>
+            <span>导入可用模型（固定白名单）</span>
+            <div><strong>GPT-5.5</strong><strong>GPT-5.6 Luna</strong><strong>GPT-5.6 Terra</strong><strong>GPT-5.6 Sol</strong></div>
+          </div>
+          <label data-import-target="cpa" hidden>CPA 地址<input name="cpa_base_url" placeholder="https://cpa.example.com"></label>
+          <label data-import-target="cpa" hidden>CPA 管理密钥<input name="cpa_management_key" type="password" autocomplete="off"></label>
+        </div>
+        </section>
+
+        <section class="config-module" data-config-module="probe" hidden>
+        <div class="section-title"><span>A</span> 账号测活</div>
+        <div class="grid">
+          <label data-target="grok">Grok 测活模型<input name="probe_model" placeholder="grok-4.5"></label>
+          <label data-target="chatgpt" hidden>ChatGPT 测活模型<input name="chatgpt_probe_model" placeholder="gpt-5.5"></label>
+          <label>测活并发数<input name="probe_concurrency" type="number" min="1" max="10"></label>
+          <label>测活错峰毫秒<input name="probe_stagger_ms" type="number" min="0" max="60000"></label>
+          <div class="probe-batch-control wide">
+            <label>注册批次<select id="probe-batch"><option value="">暂无可测活批次</option></select></label>
+          </div>
+        </div>
+        </section>
+
+        <section class="config-module" data-config-module="rotation" hidden>
+          <div class="rotation-overview" id="rotation-overview">
+            <span>账号总数 <strong id="rotation-total">0</strong></span>
+            <span class="normal">正常 <strong id="rotation-normal">0</strong></span>
+            <span class="error">错误 <strong id="rotation-error">0</strong></span>
+            <small id="rotation-schedule">每 30 分钟自动全量探活</small>
+          </div>
+          <div class="rotation-controls">
+            <label>账号状态<select id="rotation-status"><option value="">全部状态</option><option value="normal">正常</option><option value="error">错误</option></select></label>
+            <label class="rotation-search">搜索<input id="rotation-keyword" type="search" placeholder="账号、类型或错误信息"></label>
+            <label>每页<select id="rotation-page-size"><option value="20">20 条</option><option value="50">50 条</option><option value="80">80 条</option></select></label>
+            <button type="button" id="rotation-search-button" class="inline-button">搜索</button>
+          </div>
+          <div class="rotation-bulk-actions">
+            <label class="rotation-select-all"><input id="rotation-select-all" type="checkbox"> 全选当前页</label>
+            <span id="rotation-selection-count">已选 0 项</span>
+            <button type="button" id="rotation-probe-selected" class="inline-button">探活所选</button>
+            <button type="button" id="rotation-delete-selected" class="inline-button danger-button">删除所选</button>
+          </div>
+          <div class="rotation-table-wrap">
+            <table class="rotation-table">
+              <thead>
+                <tr>
+                  <th aria-label="选择"></th>
+                  <th>账号信息</th>
+                  <th>账号状态</th>
+                  <th>类型</th>
+                  <th>注册时间</th>
+                  <th>已导入站点</th>
+                  <th>导入时间</th>
+                  <th>请求状态</th>
+                  <th>存活时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody id="rotation-list"><tr><td colspan="10" class="rotation-empty">正在读取账号台账…</td></tr></tbody>
+            </table>
+          </div>
+          <div class="rotation-pagination">
+            <span id="rotation-page-summary">共 0 条</span>
+            <div>
+              <button type="button" id="rotation-prev" class="inline-button">上一页</button>
+              <span id="rotation-page-number">1 / 1</span>
+              <button type="button" id="rotation-next" class="inline-button">下一页</button>
+            </div>
+          </div>
+        </section>
+      </form>
+      </div>
+    </section>
+
+    <div class="side-column">
+    <section class="panel results log-panel">
+      <div class="results-head">
+        <div><div class="section-title"><span>05</span> 注册监控</div><p id="summary">暂无任务</p></div>
+        <div class="results-actions"><button id="reset-round" class="ghost reset-round">清除本轮</button><button id="refresh" class="ghost">立即刷新</button></div>
+      </div>
+      <div id="workflow-status-banner" class="workflow-status-banner idle"><span class="workflow-status-dot"></span><strong id="workflow-status-text">等待开始注册</strong></div>
+      <div class="monitor-flow-head">
+        <div><span>流程</span><small id="workflow-account">尚未创建账号任务</small></div>
+        <strong id="workflow-progress">0 / 0</strong>
+      </div>
+      <div id="workflow-steps" class="monitor-workflow"><div class="empty">启动任务后显示固定注册流程</div></div>
+      <div class="monitor-log-head"><span>日志</span><div><small id="activity-count">0 条</small><button type="button" id="clear-logs" class="log-clear">清空</button></div></div>
+      <div id="tasks" class="monitor-log"><div class="log-empty">注册日志将在这里自动滚动显示</div></div>
+    </section>
+    </div>
+    </div>
+  </main>
+  <div id="concurrency-warning" class="safety-modal" role="dialog" aria-modal="true" aria-labelledby="concurrency-warning-title" hidden>
+    <div class="safety-dialog">
+      <div class="safety-icon">!</div>
+      <h2 id="concurrency-warning-title">高并发安全提醒</h2>
+      <p>当前注册并发为 <strong id="concurrency-warning-value">--</strong>。并发超过 3 可能增加过盾失败、链路阻塞和账号风控概率，请确认本机 Solver 与代理资源能够承受。</p>
+      <div class="safety-performance">
+        <span>当前电脑性能评估</span>
+        <strong id="concurrency-performance-summary">正在读取性能信息…</strong>
+        <small id="concurrency-performance-advice"></small>
+      </div>
+      <div class="safety-actions">
+        <button type="button" id="concurrency-warning-cancel" class="secondary">返回调整</button>
+        <button type="button" id="concurrency-warning-continue" class="secondary">仅本次继续</button>
+        <button type="button" id="concurrency-warning-remember">继续并记住，下次不再提醒</button>
+      </div>
+    </div>
+  </div>
+  <div id="toast" role="status" aria-live="polite"></div>
+  <script src="/static/app.js?v=20260723-rotation-layout-1"></script>
+</body>
+</html>

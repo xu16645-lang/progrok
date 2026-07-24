@@ -1,0 +1,17 @@
+runtime/
+vendor/turnstile-solver/.venv/
+vendor/turnstile-solver/proxies.txt
+vendor/turnstile-solver/proxies.txt.tmp
+__pycache__/
+*.pyc
+*.pid
+.env
+config/config.json
+config/config.json.tmp
+*credentials*.txt
+*credentials*.json
+*secret*.txt
+*secret*.json
+artifacts/
+vendor/grok-build-auth/sso_output/*
+.playwright-cli/
