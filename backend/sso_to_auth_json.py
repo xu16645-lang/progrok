@@ -423,6 +423,94 @@ def sso_to_token(
         _DEVICE_FLOW_SEQUENCE_SLOTS.release()
 
 
+def sso_to_token_with_browser(
+    sso_cookie: str,
+    authorize: Any,
+    *,
+    quiet: bool = False,
+    failure: dict[str, Any] | None = None,
+    should_cancel: Any | None = None,
+) -> dict | None:
+    """Run device consent in an authenticated browser and return OAuth tokens.
+
+    Device-code creation and token polling remain OAuth client operations.  The
+    user-facing verify and approve actions are delegated to ``authorize`` so the
+    application no longer emulates those browser forms with direct HTTP posts.
+    """
+    log = (lambda *a, **k: None) if quiet else print
+    _acquire_device_flow_sequence_slot(should_cancel)
+    try:
+        session = requests.Session()
+        session.cookies.set("sso", sso_cookie, domain=".x.ai")
+        retries = _device_flow_retries()
+        for attempt in range(1, retries + 1):
+            _raise_if_cancelled(should_cancel)
+            attempt_failure: dict[str, Any] = {}
+            _wait_device_flow_slot(should_cancel)
+            dc = request_device_code(
+                session=session,
+                failure=attempt_failure,
+                retries=1,
+                should_cancel=should_cancel,
+            )
+            if not dc:
+                _copy_failure(failure, attempt_failure)
+                if _retry_device_flow(
+                    log, attempt, retries, attempt_failure, should_cancel
+                ):
+                    continue
+                return None
+            user_code = str(dc.get("user_code") or "")
+            device_code = str(dc.get("device_code") or "")
+            verify_url = str(dc.get("verification_uri_complete") or "")
+            if not user_code or not device_code or not verify_url:
+                _record_failure(
+                    attempt_failure,
+                    stage="device_code",
+                    detail="device/code response is missing required fields",
+                    retryable=False,
+                )
+                _copy_failure(failure, attempt_failure)
+                return None
+            try:
+                authorize(verify_url, user_code)
+            except Exception as exc:  # noqa: BLE001
+                _record_failure(
+                    attempt_failure,
+                    stage="approve",
+                    detail=exc,
+                    retryable=_is_retryable_network_error(exc),
+                )
+                _copy_failure(failure, attempt_failure)
+                if _retry_device_flow(
+                    log, attempt, retries, attempt_failure, should_cancel
+                ):
+                    continue
+                return None
+            token = poll_token(
+                device_code,
+                dc.get("interval", 1),
+                dc.get("expires_in", 1800),
+                timeout=float(os.getenv("GROK2API_SSO_POLL_TIMEOUT", "45") or 45),
+                session=session,
+                immediate=True,
+                failure=attempt_failure,
+                should_cancel=should_cancel,
+            )
+            if token:
+                if failure is not None:
+                    failure.clear()
+                return token
+            _copy_failure(failure, attempt_failure)
+            if not _retry_device_flow(
+                log, attempt, retries, attempt_failure, should_cancel
+            ):
+                return None
+        return None
+    finally:
+        _DEVICE_FLOW_SEQUENCE_SLOTS.release()
+
+
 def _sso_to_token_locked(
     sso_cookie: str,
     *,

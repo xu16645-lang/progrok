@@ -10,7 +10,7 @@ from typing import Any
 from registration_state import load_state, save_state
 
 
-# Hard cap for multi-thread registration concurrency only (YesCaptcha + xAI rate limits).
+# Hard cap for concurrent xAI browser registrations.
 # Batch count is intentionally uncapped — only concurrency bounds parallelism.
 MAX_CONCURRENCY = int(os.environ.get("GROK2API_REG_MAX_CONCURRENCY", "10") or 10)
 DEFAULT_CONCURRENCY = int(os.environ.get("GROK2API_REG_CONCURRENCY", "3") or 3)
@@ -368,7 +368,7 @@ def _record_register_task(
         task_log.record(
             "register",
             task_id=tid,
-            summary=str(summary or f"协议注册 {tid}")[:500],
+            summary=str(summary or f"浏览器注册 {tid}")[:500],
             status=str(status or "done"),
             ok=ok,
             progress_done=int(progress_done or 0),

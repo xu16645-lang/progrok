@@ -263,7 +263,7 @@ def _normalize_import_record_for_registration_target(
     )
 
 
-app = FastAPI(title="ProGrok 协议注册", version="1.0.0")
+app = FastAPI(title="ProGrok 浏览器注册", version="1.0.0")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 

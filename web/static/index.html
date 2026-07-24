@@ -6,7 +6,7 @@
   <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
   <meta http-equiv="Pragma" content="no-cache">
   <meta http-equiv="Expires" content="0">
-  <title>ProGrok 协议注册 — Grok / ChatGPT</title>
+  <title>ProGrok 浏览器注册 — Grok / ChatGPT</title>
   <link rel="icon" href="data:,">
   <link rel="stylesheet" href="/static/style.css?v=20260723-rotation-layout-1">
 </head>
@@ -16,7 +16,7 @@
       <div>
         <p class="eyebrow">STANDALONE REGISTRATION</p>
         <div class="title-line">
-          <h1>ProGrok 协议注册</h1>
+          <h1>ProGrok 浏览器注册</h1>
         </div>
         <p class="subtitle">独立运行 · 本地保存 · 无需 PostgreSQL</p>
       </div>
@@ -71,13 +71,14 @@
           <label><span id="registration-count-label">注册数量</span><input name="count" type="number" min="1" max="10000"></label>
           <label><span id="registration-concurrency-label">并发数</span><input name="concurrency" type="number" min="1" max="10"></label>
           <label data-target="grok">错峰毫秒<input name="stagger_ms" type="number" min="0" max="60000"></label>
-          <label data-target="chatgpt" hidden>步骤操作延迟毫秒<input name="chatgpt_step_delay_ms" type="number" min="0" max="30000" value="3000"></label>
+          <label>步骤操作延迟毫秒<input name="chatgpt_step_delay_ms" type="number" min="0" max="30000" value="3000"></label>
           <label class="tune-toggle" data-target="grok"><span>自动调优错峰</span><input name="auto_tune_enabled" type="checkbox"></label>
+          <label class="tune-toggle" data-target="grok" title="开启后注册时会弹出浏览器窗口，便于观察失败页面"><span>显示注册浏览器（调试）</span><input id="grok-browser-visible" type="checkbox"></label>
           <label class="tune-toggle" data-target="chatgpt" hidden title="开启后注册时会弹出浏览器窗口，便于观察失败页面"><span>显示注册浏览器（调试）</span><input id="chatgpt-browser-visible" type="checkbox"></label>
           <div id="performance-profile" class="performance-profile wide">正在评估本机性能…</div>
         </div>
-        <div class="section-title" data-target="grok"><span>A</span> 验证码与过盾</div>
-        <div class="grid" data-target="grok">
+        <div class="section-title" data-target="grok" style="display:none"><span>A</span> 验证码与过盾</div>
+        <div class="grid" data-target="grok" style="display:none">
           <label>Captcha<select name="captcha_provider"><option value="local">本地 Turnstile Solver</option><option value="yescaptcha">YesCaptcha</option></select></label>
           <label><span class="field-label">本地 Solver <span id="solver-state" class="detect-state">检测中…</span></span><div class="input-action"><input name="local_solver_url" placeholder="正在自动检测" readonly><button type="button" id="detect-solver" class="inline-button">重新检测</button></div></label>
           <label>YesCaptcha Key<input name="yescaptcha_key" type="password" autocomplete="off"></label>
@@ -237,7 +238,7 @@
     <div class="safety-dialog">
       <div class="safety-icon">!</div>
       <h2 id="concurrency-warning-title">高并发安全提醒</h2>
-      <p>当前注册并发为 <strong id="concurrency-warning-value">--</strong>。并发超过 3 可能增加过盾失败、链路阻塞和账号风控概率，请确认本机 Solver 与代理资源能够承受。</p>
+      <p>当前注册并发为 <strong id="concurrency-warning-value">--</strong>。并发超过 3 可能增加浏览器阻塞和账号风控概率，请确认本机浏览器与代理资源能够承受。</p>
       <div class="safety-performance">
         <span>当前电脑性能评估</span>
         <strong id="concurrency-performance-summary">正在读取性能信息…</strong>

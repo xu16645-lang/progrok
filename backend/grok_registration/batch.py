@@ -71,55 +71,10 @@ def _spawn_batch_runner(
             "already_running": True,
         }
 
-    provider = (captcha_provider or "local").strip().lower()
-    if provider not in {"local", "yescaptcha"}:
-        provider = "local"
-    key = (yescaptcha_key or "").strip()
-    if provider == "local":
-        key = "local"
-        solver_url = ctx._local_solver_base_url(None)
-        try:
-            ctx.values["CAPTCHA_PROVIDER"] = "local"
-            ctx.values["LOCAL_SOLVER_URL"] = solver_url
-        except Exception:
-            pass
-        ctx.os.environ["GROK2API_CAPTCHA_PROVIDER"] = "local"
-        ctx.os.environ["CAPTCHA_PROVIDER"] = "local"
-        ctx.os.environ["GROK2API_LOCAL_SOLVER_URL"] = solver_url
-        ctx.os.environ["LOCAL_SOLVER_URL"] = solver_url
-        ctx.os.environ["GROK2API_YESCAPTCHA_ENDPOINT"] = solver_url
-        ctx.os.environ["YESCAPTCHA_ENDPOINT"] = solver_url
-        solver_wait = ctx.wait_for_local_solver(solver_url)
-        if not solver_wait.get("ready"):
-            ctx._release_batch_runner(bid, lock_token)
-            return {
-                "ok": False,
-                "error": solver_wait.get("error") or f"本地过盾未就绪: {solver_url}",
-                "batch_id": bid,
-                "local_solver": solver_wait,
-            }
-    else:
-        if not key:
-            ctx._release_batch_runner(bid, lock_token)
-            return {
-                "ok": False,
-                "error": "YESCAPTCHA_KEY missing",
-                "batch_id": bid,
-            }
-        try:
-            ctx.values["CAPTCHA_PROVIDER"] = "yescaptcha"
-            ctx.values["YESCAPTCHA_KEY"] = key
-            ctx.values["LOCAL_SOLVER_URL"] = ""
-        except Exception:
-            pass
-        for k in (
-            "GROK2API_LOCAL_SOLVER_URL",
-            "LOCAL_SOLVER_URL",
-            "GROK2API_YESCAPTCHA_ENDPOINT",
-            "YESCAPTCHA_ENDPOINT",
-            "YESCAPTCHA_API_BASE",
-        ):
-            ctx.os.environ.pop(k, None)
+    # Persisted batches may still say local/yescaptcha. New and resumed xAI
+    # registrations always let the real browser handle the upstream challenge.
+    provider = "browser"
+    key = ""
 
             # `proxy` may be multi-line pool text; expand once for this runner.
     proxy_pool = ctx._proxy_pool(proxy)
@@ -211,6 +166,7 @@ def _spawn_batch_runner(
         # jobs in flight and submit the next one as soon as any slot completes.
         next_i = 1
         in_flight: dict[Any, int] = {}
+        worker_state = ctx.threading.local()
 
         def _max_inflight() -> int:
             if tuner.enabled:
@@ -453,11 +409,18 @@ def _spawn_batch_runner(
 
                 ctx._wait_reg_admission(check_cancel=_job_cancel)
                 admitted = True
+                runtime = getattr(worker_state, "browser_runtime", None)
+                if runtime is None:
+                    from xai_browser import XaiBrowserRuntime
+
+                    runtime = XaiBrowserRuntime()
+                    worker_state.browser_runtime = runtime
                 ctx._run_registration(
                     sid,
                     key,
                     job_proxy or "",
                     receiver,
+                    runtime,
                 )
             except ctx._RegPaused as e:
                 with ctx._lock:
@@ -680,6 +643,27 @@ def _spawn_batch_runner(
                     if _batch_cancel_requested():
                         continue
 
+                cleanup_barrier = ctx.threading.Barrier(workers)
+
+                def _cleanup_worker_browser() -> None:
+                    runtime = getattr(worker_state, "browser_runtime", None)
+                    if runtime is not None:
+                        runtime.close()
+                        worker_state.browser_runtime = None
+                    try:
+                        cleanup_barrier.wait(timeout=15)
+                    except ctx.threading.BrokenBarrierError:
+                        pass
+
+                cleanup_futures = [
+                    pool.submit(_cleanup_worker_browser) for _ in range(workers)
+                ]
+                for cleanup_future in cleanup_futures:
+                    try:
+                        cleanup_future.result(timeout=20)
+                    except Exception:
+                        pass
+
         finally:
             stop_renew = True
             # Best-effort cancel of any leftover futures (usually empty now).
@@ -754,7 +738,7 @@ def _spawn_batch_runner(
                     st = str(b.get("status") or "done")
                     ctx._record_register_task(
                         task_id=str(bid),
-                        summary=str(b.get("message") or f"协议注册批次 {bid}"),
+                        summary=str(b.get("message") or f"浏览器注册批次 {bid}"),
                         status=st,
                         ok=st in {"done", "partial"} and ok_n > 0,
                         progress_done=int(finished or 0),

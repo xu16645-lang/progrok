@@ -1,18 +1,12 @@
-"""Adapter: grok-build-auth -> grokcli-2api account pool.
+"""Adapter: xAI browser registration -> grokcli-2api account pool.
 
-Drives the vendored ``grok-build-auth/xconsole_client`` protocol client to:
+1. register an x.ai account in an isolated browser context
+2. extract and preserve the browser SSO/session cookies
+3. approve the OAuth device request in the same browser context
+4. import the resulting auth entry into the multi-account pool
 
-1. register an x.ai account with MoeMail + YesCaptcha
-2. extract SSO/session cookies
-3. convert SSO via sso_to_auth_json into a local auth.json entry
-4. import that entry into the multi-account pool
-
-Import of ``xconsole_client`` is deferred so the main API can start even when
-optional deps are missing. Registration endpoints then return a clear error
-instead of crashing process startup.
-
-``grok-build-auth`` is vendored in-tree (not a git submodule).
-Legacy browser (DrissionPage) and grpc-session registration engines were removed.
+Browser imports are deferred so the main API can still start when optional
+dependencies are missing and report a clear availability error.
 """
 
 from __future__ import annotations
@@ -89,7 +83,7 @@ BACKEND_DIR = Path(__file__).resolve().parent
 APP_DIR = BACKEND_DIR.parent
 RUNTIME_DATA_DIR = APP_DIR / "runtime" / "data"
 GBA = APP_DIR / "vendor" / "grok-build-auth"
-ADAPTER_BUILD = "2026-07-15-import-success-only-8"
+ADAPTER_BUILD = "2026-07-24-xai-browser-registration-1"
 # Newly registered accounts often need a short settle window before probe.
 REGISTER_PROBE_DELAY_SEC = float(
     os.environ.get("GROK2API_REG_PROBE_DELAY_SEC", "30") or 30
@@ -149,7 +143,7 @@ def _session_task_log_payload(sess: dict[str, Any] | None) -> dict[str, Any]:
     email = str(s.get("email") or "").strip()
     summary = str(s.get("message") or "").strip()
     if not summary:
-        summary = f"协议注册 {email or s.get('id') or ''}".strip()
+        summary = f"浏览器注册 {email or s.get('id') or ''}".strip()
     return {
         "task_id": str(s.get("id") or ""),
         "summary": summary,
@@ -261,13 +255,24 @@ def wait_for_local_solver(
 
 
 def registration_available() -> dict[str, Any]:
-    return _solver.registration_available(
-        gba=GBA,
-        adapter_build=ADAPTER_BUILD,
-        captcha_provider=CAPTCHA_PROVIDER,
-        yescaptcha_key=YESCAPTCHA_KEY,
-        local_solver_url=LOCAL_SOLVER_URL,
-    )
+    try:
+        from xai_browser import _ensure_playwright
+
+        _ensure_playwright()
+        return {
+            "ok": True,
+            "available": True,
+            "engine": "xai-browser",
+            "adapter_build": ADAPTER_BUILD,
+        }
+    except Exception as exc:  # noqa: BLE001
+        return {
+            "ok": False,
+            "available": False,
+            "engine": "xai-browser",
+            "adapter_build": ADAPTER_BUILD,
+            "error": str(exc),
+        }
 
 
 # --------------------------------------------------------------------------- #
@@ -512,6 +517,7 @@ def _run_registration(
     yescaptcha_key: str,
     proxy: str,
     receiver: Any,
+    browser_runtime: Any | None = None,
 ) -> None:
     _worker._run_registration(
         _registration_context(),
@@ -519,6 +525,7 @@ def _run_registration(
         yescaptcha_key,
         proxy,
         receiver,
+        browser_runtime,
     )
 
 

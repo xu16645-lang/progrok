@@ -12,6 +12,7 @@ if str(BACKEND_DIR) not in sys.path:
 
 import app
 import grok_build_adapter as grok_adapter
+import sso_to_auth_json
 from grok_build_adapter import _make_email_receiver, _snapshot_reg_config
 from xai_browser import XAI_SIGNUP_URL, XaiBrowserRuntime, XaiVisibleRegistration
 
@@ -171,7 +172,7 @@ class XaiBrowserTests(unittest.TestCase):
 
 
 class XaiRegistrationConfigTests(unittest.TestCase):
-    def test_grok_protocol_registration_forces_headless(self):
+    def test_grok_browser_registration_preserves_visible_mode(self):
         captured = {}
 
         class _Adapter:
@@ -196,17 +197,47 @@ class XaiRegistrationConfigTests(unittest.TestCase):
             result = app.start_register(settings)
 
         self.assertTrue(result["ok"])
-        self.assertTrue(captured["headless"])
+        self.assertFalse(captured["headless"])
         self.assertEqual(
             captured["hotmail_local_base_url"],
             settings.hotmail_local_base_url,
         )
 
-    def test_xai_protocol_browser_toggle_is_not_rendered(self):
+    def test_xai_browser_toggle_is_rendered(self):
         html = (BACKEND_DIR.parent / "web" / "static" / "index.html").read_text(
             encoding="utf-8"
         )
-        self.assertNotIn('id="grok-browser-visible"', html)
+        self.assertIn('id="grok-browser-visible"', html)
+
+    def test_xai_oauth_consent_uses_browser_callback(self):
+        authorized = []
+        token = {"access_token": "access", "refresh_token": "refresh"}
+        device = {
+            "user_code": "ABC123",
+            "device_code": "device-token",
+            "verification_uri_complete": "https://auth.x.ai/device?code=ABC123",
+            "interval": 1,
+            "expires_in": 120,
+        }
+
+        with (
+            patch.object(sso_to_auth_json, "_acquire_device_flow_sequence_slot"),
+            patch.object(sso_to_auth_json, "_wait_device_flow_slot"),
+            patch.object(sso_to_auth_json, "request_device_code", return_value=device),
+            patch.object(sso_to_auth_json, "poll_token", return_value=token),
+            patch.object(sso_to_auth_json._DEVICE_FLOW_SEQUENCE_SLOTS, "release"),
+        ):
+            result = sso_to_auth_json.sso_to_token_with_browser(
+                "sso-cookie",
+                lambda url, code: authorized.append((url, code)),
+                quiet=True,
+            )
+
+        self.assertEqual(result, token)
+        self.assertEqual(
+            authorized,
+            [("https://auth.x.ai/device?code=ABC123", "ABC123")],
+        )
 
     def test_grok_allows_hotmail_local_pool(self):
         captured = {}

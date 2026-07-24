@@ -184,7 +184,7 @@ def start_register(ctx, settings=None, paused=False):
         persisted["sub2api_group_name"] = cfg["sub2api_group_name"]
         persisted["sub2api_xai_group_id"] = cfg["sub2api_xai_group_id"]
         persisted["sub2api_xai_group_name"] = cfg["sub2api_xai_group_name"]
-        persisted["grok_headless"] = True
+        persisted["grok_headless"] = cfg["grok_headless"]
         persisted["chatgpt_headless"] = cfg["chatgpt_headless"]
         ctx.save_config(persisted)
     ctx.apply_environment(cfg)
@@ -216,7 +216,7 @@ def start_register(ctx, settings=None, paused=False):
                 "prefix": cfg["mail_prefix"],
                 "probe_delay_sec": cfg["probe_delay_sec"],
                 "auto_tune_enabled": cfg["auto_tune_enabled"],
-                "headless": True,
+                "headless": bool(cfg.get("grok_headless", True)),
             }
         )
     else:

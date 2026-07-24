@@ -169,7 +169,7 @@ def _start_one_registration(
             ctx._record_register_task(
                 task_id=payload["task_id"],
                 summary=payload["summary"]
-                or f"协议注册启动 {started_sess.get('email') or sid}",
+                or f"浏览器注册启动 {started_sess.get('email') or sid}",
                 status="running",
                 ok=None,
                 progress_done=0,
@@ -226,7 +226,9 @@ def start_registration(
     job picks one entry via ``proxy_strategy`` (round_robin / random / sticky).
     """
     try:
-        ctx.ensure_xconsole()
+        from xai_browser import _ensure_playwright
+
+        _ensure_playwright()
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e)}
 
@@ -244,80 +246,10 @@ def start_registration(
         except (TypeError, ValueError):
             pass
 
-    provider = (
-        (
-            captcha_provider
-            or ctx.CAPTCHA_PROVIDER
-            or ctx.os.environ.get("GROK2API_CAPTCHA_PROVIDER")
-            or ctx.os.environ.get("CAPTCHA_PROVIDER")
-            or "local"
-        )
-        .strip()
-        .lower()
-    )
-    if provider not in {"local", "yescaptcha"}:
-        provider = "local"
-    try:
-        ctx.values["CAPTCHA_PROVIDER"] = provider
-    except Exception:
-        pass
-
-    if provider == "local":
-        # Always inline in main container; ignore any external/custom URL.
-        solver_url = ctx._local_solver_base_url(local_solver_url)
-        try:
-            ctx.values["LOCAL_SOLVER_URL"] = solver_url
-        except Exception:
-            pass
-        ctx.os.environ["GROK2API_LOCAL_SOLVER_URL"] = solver_url
-        ctx.os.environ["LOCAL_SOLVER_URL"] = solver_url
-        ctx.os.environ["GROK2API_YESCAPTCHA_ENDPOINT"] = solver_url
-        ctx.os.environ["YESCAPTCHA_ENDPOINT"] = solver_url
-        key = "local"
-        # Gate: never spawn registration workers before the inline solver answers.
-        # Lazy browser mode is fine (pool_ready may be false); HTTP /health is enough.
-        solver_wait = ctx.wait_for_local_solver(solver_url)
-        if not solver_wait.get("ready"):
-            return {
-                "ok": False,
-                "error": solver_wait.get("error") or f"本地过盾未就绪: {solver_url}",
-                "local_solver": solver_wait,
-            }
-    else:
-        # Cloud YesCaptcha must not inherit local solver endpoint/key.
-        try:
-            ctx.values["LOCAL_SOLVER_URL"] = ""
-        except Exception:
-            pass
-        for k in (
-            "GROK2API_LOCAL_SOLVER_URL",
-            "LOCAL_SOLVER_URL",
-            "GROK2API_YESCAPTCHA_ENDPOINT",
-            "YESCAPTCHA_ENDPOINT",
-            "YESCAPTCHA_API_BASE",
-        ):
-            ctx.os.environ.pop(k, None)
-        key = (
-            yescaptcha_key
-            or ctx.YESCAPTCHA_KEY
-            or ctx.os.environ.get("GROK2API_YESCAPTCHA_KEY")
-            or ctx.os.environ.get("YESCAPTCHA_API_KEY")
-            or ""
-        ).strip()
-        if key == "local":
-            key = ""
-        if not key:
-            return {
-                "ok": False,
-                "error": "YESCAPTCHA_KEY is required (set GROK2API_YESCAPTCHA_KEY, save in 协议注册配置, or pass yescaptcha_key)",
-            }
-
-    if key and key != ctx.YESCAPTCHA_KEY:
-        # keep module attr in sync for subsequent workers
-        try:
-            ctx.values["YESCAPTCHA_KEY"] = key
-        except Exception:
-            pass
+    # Browser registration owns the real page challenge. Keep legacy arguments in
+    # the public API so persisted configs and older clients remain loadable.
+    provider = "browser"
+    key = ""
 
     try:
         n = int(count if count is not None else 1)
@@ -447,7 +379,7 @@ def start_registration(
     # session finishes (previously only the terminal row was written).
     ctx._record_register_task(
         task_id=batch_id,
-        summary=f"协议注册批次启动 count={n} concurrency={workers}",
+        summary=f"浏览器注册批次启动 count={n} concurrency={workers}",
         status="running",
         ok=None,
         progress_done=0,
