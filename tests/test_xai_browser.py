@@ -16,6 +16,7 @@ import sso_to_auth_json
 from grok_build_adapter import _make_email_receiver, _snapshot_reg_config
 from xai_browser import (
     PASSWORD_SUBMIT_DELAY_MS,
+    XAI_GROK_URL,
     XAI_SIGNUP_URL,
     XaiBrowserRuntime,
     XaiVisibleRegistration,
@@ -107,11 +108,17 @@ class XaiBrowserTests(unittest.TestCase):
         visual = XaiVisibleRegistration(on_progress=lambda _message: None)
         visual.page = _Page()
         targets = [None, _Input("password"), _Input("first"), _Input("last")]
-        sso_results = [(None, {}), ("sso-token", {"sso": "sso-token"})]
+        sso_results = iter([(None, {}), ("sso-token", {"sso": "sso-token"})])
+
+        def extract_sso():
+            result = next(sso_results)
+            if result[0]:
+                visual.page.url = XAI_GROK_URL
+            return result
 
         with (
             patch.object(visual, "open"),
-            patch.object(visual, "_extract_sso", side_effect=sso_results),
+            patch.object(visual, "_extract_sso", side_effect=extract_sso),
             patch.object(visual, "_first_visible", side_effect=targets),
             patch.object(visual, "_verification_target", return_value=None),
             patch.object(visual, "_raise_page_error"),
@@ -134,6 +141,16 @@ class XaiBrowserTests(unittest.TestCase):
         self.assertLess(password_fill, wait)
         self.assertLess(wait, submit)
         self.assertTrue(result["ok"])
+
+    def test_sub2_oauth_callback_requires_matching_state(self):
+        callback = "http://127.0.0.1:56121/callback?code=code-1&state=state-1"
+
+        self.assertEqual(
+            XaiVisibleRegistration._callback_from_url(callback, "state-1"),
+            callback,
+        )
+        with self.assertRaisesRegex(Exception, "state"):
+            XaiVisibleRegistration._callback_from_url(callback, "other-state")
 
     def test_grok_monitor_projection_redacts_runtime_fields(self):
         session = {

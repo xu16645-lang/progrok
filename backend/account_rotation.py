@@ -154,6 +154,10 @@ def record_imported_session(account_type: str, session: dict[str, Any]) -> dict[
             session.get("session_file") or existing.get("source_session_file"), 600
         )
         site_target = _text(auto_import.get("target") or existing.get("site_target"), 60)
+        oauth = session.get("oauth") if isinstance(session.get("oauth"), dict) else {}
+        credential_source = _text(
+            oauth.get("path") or existing.get("credential_source"), 80
+        )
         if existing and all(
             existing.get(key) == value
             for key, value in {
@@ -163,6 +167,7 @@ def record_imported_session(account_type: str, session: dict[str, Any]) -> dict[
                 "source_session_id": session_id or _text(existing.get("source_session_id"), 160),
                 "source_session_file": source_session_file,
                 "site_target": site_target,
+                "credential_source": credential_source,
                 "imported_to_site": True,
             }.items()
         ):
@@ -175,6 +180,7 @@ def record_imported_session(account_type: str, session: dict[str, Any]) -> dict[
             "source_session_id": session_id or _text(existing.get("source_session_id"), 160),
             "source_session_file": source_session_file,
             "site_target": site_target,
+            "credential_source": credential_source,
             "imported_to_site": True,
             "registered_at": _as_timestamp(existing.get("registered_at"), registered_at),
             "imported_at": _as_timestamp(existing.get("imported_at"), imported_at),
@@ -357,6 +363,19 @@ def _probe_record(record: dict[str, Any], config: dict[str, Any]) -> dict[str, A
         from chatgpt_build_adapter import probe_chatgpt_session
 
         return probe_chatgpt_session(session, model)
+
+    if _text(record.get("credential_source"), 80) == "sub2api_login_callback":
+        from account_pipeline import probe_grok_account_in_sub2api
+
+        return probe_grok_account_in_sub2api(
+            _text(record.get("account_id"), 180),
+            model=_text(config.get("probe_model") or "grok-4.5", 100),
+            base_url=_text(config.get("sub2api_base_url"), 500),
+            api_key=_text(config.get("sub2api_api_key"), 500),
+            auth_mode=_text(config.get("sub2api_auth_mode") or "password", 20),
+            admin_email=_text(config.get("sub2api_admin_email"), 320),
+            admin_password=str(config.get("sub2api_admin_password") or ""),
+        )
 
     from account_pipeline import probe_account
 

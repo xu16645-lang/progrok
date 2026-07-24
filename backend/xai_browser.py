@@ -5,12 +5,14 @@ import re
 import secrets
 import time
 from typing import Any, Callable
+from urllib.parse import parse_qs, urlparse
 
 
 XAI_SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
 XAI_GROK_URL = "https://grok.com/"
 PASSWORD_SUBMIT_DELAY_MS = 5_000
 PAGE_SETTLE_DELAY_MS = 600
+REGISTRATION_LANDING_TIMEOUT_SEC = 60.0
 
 _FIRST_NAMES = (
     "Aiden",
@@ -447,18 +449,31 @@ class XaiVisibleRegistration:
         last_code = ""
         first_name_value, last_name_value = self._generate_profile()
         self._progress("profile", "generated")
+        sso_seen_at: float | None = None
         while True:
             self._check_cancel()
             sso, cookies = self._extract_sso()
             if sso:
-                self._progress("completion", "done", url=str(self.page.url)[:100])
-                return {
-                    "ok": True,
-                    "email": email,
-                    "sso": sso,
-                    "cookies": cookies,
-                    "steps": list(self.steps),
-                }
+                current_url = str(self.page.url or "")
+                still_on_signup = "/sign-up" in current_url.lower()
+                if not still_on_signup:
+                    self._progress("completion", "done", url=current_url[:100])
+                    return {
+                        "ok": True,
+                        "email": email,
+                        "sso": sso,
+                        "cookies": cookies,
+                        "steps": list(self.steps),
+                    }
+                if sso_seen_at is None:
+                    sso_seen_at = time.time()
+                    self._progress("completion", "waiting_for_landing")
+                if time.time() - sso_seen_at >= REGISTRATION_LANDING_TIMEOUT_SEC:
+                    raise XaiBrowserError(
+                        "xAI 已生成登录 Session，但注册页未自然跳转到登录成功页面"
+                    )
+                self._wait(500)
+                continue
             self._raise_page_error(email)
 
             if "signup_method" not in acted and re.search(
@@ -613,6 +628,100 @@ class XaiVisibleRegistration:
                 self._wait(1_000)
                 continue
             self._wait(250)
+
+    @staticmethod
+    def _callback_from_url(url: str, expected_state: str) -> str | None:
+        try:
+            parsed = urlparse(str(url or ""))
+            values = parse_qs(parsed.query)
+        except Exception:
+            return None
+        code = str((values.get("code") or [""])[0]).strip()
+        state = str((values.get("state") or [""])[0]).strip()
+        if not code:
+            return None
+        if expected_state and state and state != expected_state:
+            raise XaiBrowserError("Sub2API Grok OAuth 回调 state 不匹配")
+        return str(url)
+
+    def _authorization_code_from_page(self) -> str | None:
+        if self.page is None:
+            return None
+        text = self._page_text()
+        if not re.search(
+            r"copy.*code|input.*code|code.*complete.*login|复制.*代码|输入.*代码|完成登录",
+            text,
+            re.I,
+        ):
+            return None
+        try:
+            candidates = self.page.locator("input, textarea, code")
+            for index in range(min(20, int(candidates.count()))):
+                candidate = candidates.nth(index)
+                if not candidate.is_visible():
+                    continue
+                try:
+                    value = str(candidate.input_value(timeout=1_000) or "").strip()
+                except Exception:
+                    try:
+                        value = str(candidate.inner_text(timeout=1_000) or "").strip()
+                    except Exception:
+                        continue
+                if re.fullmatch(r"[A-Za-z0-9_-]{20,}", value):
+                    return value
+        except Exception:
+            pass
+        return None
+
+    def authorize_sub2_oauth(self, auth_url: str, expected_state: str) -> str:
+        """Authorize Sub2API's PKCE request and return its callback URL or code."""
+        if self.page is None:
+            raise XaiBrowserError("xAI 授权浏览器未启动")
+        self._progress("sub2_oauth", "opening_authorization")
+        self._action_delay()
+        try:
+            self.page.goto(auth_url, wait_until="domcontentloaded", timeout=45_000)
+        except Exception:
+            # A localhost callback can fail to connect after the URL already contains code.
+            callback = self._callback_from_url(str(self.page.url or ""), expected_state)
+            if callback:
+                self._progress("sub2_oauth", "code_captured")
+                return callback
+        self._settle_page()
+        clicked_signatures: set[str] = set()
+        deadline = min(self.deadline, time.time() + 120.0)
+        while time.time() < deadline:
+            self._check_cancel()
+            current_url = str(self.page.url or "")
+            callback = self._callback_from_url(current_url, expected_state)
+            if callback:
+                self._progress("sub2_oauth", "code_captured")
+                return callback
+            page_code = self._authorization_code_from_page()
+            if page_code:
+                self._progress("sub2_oauth", "code_captured")
+                return page_code
+            text = self._page_text()
+            if re.search(
+                r"access denied|authorization.*failed|request.*denied|授权.*失败|拒绝授权",
+                text,
+                re.I,
+            ):
+                raise XaiBrowserError(f"Sub2API Grok OAuth 授权失败：{text[:240]}")
+            action = self._find_action(
+                r"allow|authorize|approve|accept|confirm|continue|grant|允许|授权|同意|确认|继续"
+            )
+            if action is not None:
+                signature = f"{current_url}|{text[:160]}"
+                if signature not in clicked_signatures:
+                    clicked_signatures.add(signature)
+                    self._action_delay()
+                    action.click(timeout=3_000)
+                    self._progress("sub2_oauth", "approval_submitted")
+                    self._settle_page()
+                    continue
+            self._wait(500)
+        raise XaiBrowserError("等待 Sub2API Grok OAuth 回调或授权码超时")
 
     def authorize_device(self, verify_url: str, user_code: str) -> None:
         """Approve an OAuth device request through the authenticated browser page."""

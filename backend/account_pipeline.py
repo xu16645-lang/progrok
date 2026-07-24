@@ -29,6 +29,8 @@ _lightweight_probe = _grok_probe._lightweight_probe
 _sub2api_auth_headers = _sub2api._sub2api_auth_headers
 _chatgpt_agent_identity = _sub2api._chatgpt_agent_identity
 _find_sub2api_account = _sub2api._find_sub2api_account
+create_grok_oauth_in_sub2api = _sub2api.create_grok_oauth_in_sub2api
+probe_grok_account_in_sub2api = _sub2api.probe_grok_account_in_sub2api
 
 
 def _call_with_client(

@@ -124,6 +124,80 @@ def _run_registration(
 
             hotmail_marked_used = mark_used(hotmail_account_id)
 
+        output_target = str(
+            pipeline_cfg.get("output_format")
+            or pipeline_cfg.get("target")
+            or "cpa"
+        ).strip().lower()
+        direct_sub2_oauth = bool(pipeline_cfg.get("auto_import_enabled")) and (
+            output_target == "sub2api"
+        )
+        if direct_sub2_oauth:
+            update("importing", "正在向 Sub2API 请求 Grok OAuth 授权链接")
+            from account_pipeline import create_grok_oauth_in_sub2api
+
+            direct_result = create_grok_oauth_in_sub2api(
+                authorize=browser_session.authorize_sub2_oauth,
+                email=email,
+                base_url=str(pipeline_cfg.get("sub2api_base_url") or ""),
+                api_key=str(pipeline_cfg.get("sub2api_api_key") or ""),
+                auth_mode=str(pipeline_cfg.get("sub2api_auth_mode") or "password"),
+                admin_email=str(pipeline_cfg.get("sub2api_admin_email") or ""),
+                admin_password=str(pipeline_cfg.get("sub2api_admin_password") or ""),
+                group_id=int(pipeline_cfg.get("sub2api_xai_group_id") or 0),
+            )
+            if not direct_result.get("ok"):
+                raise RuntimeError(
+                    f"Sub2API Grok OAuth 直接导入失败：{direct_result.get('error') or '未知错误'}；"
+                    "原始 Session 已保留"
+                )
+            external_account_id = str(direct_result.get("account_id") or "")
+            auto_import = {
+                "enabled": True,
+                "target": "sub2api",
+                "ok": True,
+                "skipped": False,
+                "count": 1,
+                "imported": 1,
+                "failed": 0,
+                "group_id": direct_result.get("group_id"),
+                "path": "grok_oauth_callback",
+            }
+            update(
+                "imported",
+                "Sub2API OAuth 授权码已回填，账号已直接导入并绑定分组",
+                auto_import=auto_import,
+                imported_account_ids=[],
+                imported_accounts=[
+                    {
+                        "id": external_account_id,
+                        "email": direct_result.get("email") or email,
+                        "site": "sub2api",
+                    }
+                ],
+                oauth={
+                    "path": "sub2api_login_callback",
+                    "email": email,
+                    "account_id": external_account_id,
+                },
+                pipeline_queue={
+                    "phase": "done",
+                    "position": 0,
+                    "concurrency": int(
+                        pipeline_cfg.get("pipeline_concurrency") or 1
+                    ),
+                },
+            )
+            try:
+                from account_rotation import record_imported_session
+
+                with ctx._lock:
+                    imported_session = dict(ctx._sessions.get(sid) or sess)
+                record_imported_session("xai", imported_session)
+            except Exception:
+                pass
+            return
+
         update("importing", "正在浏览器中完成 xAI OAuth 设备授权")
         import sso_to_auth_json as sso_import
 
@@ -180,9 +254,6 @@ def _run_registration(
 
         import accounts
 
-        output_target = str(
-            pipeline_cfg.get("output_format") or pipeline_cfg.get("target") or "cpa"
-        ).strip().lower()
         output_format = "sub2api" if output_target == "sub2api" else "cpa"
         import_result = accounts.import_auth_payload(
             auth_payload,

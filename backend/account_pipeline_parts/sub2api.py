@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import json
-from typing import Any
+from typing import Any, Callable
 
 import httpx
 
@@ -178,6 +178,222 @@ def _find_sub2api_account(
         if item_email == target:
             return item
     return None
+
+
+def create_grok_oauth_in_sub2api(
+    *,
+    authorize: Callable[[str, str], str],
+    email: str,
+    base_url: str,
+    api_key: str = "",
+    auth_mode: str = "password",
+    admin_email: str = "",
+    admin_password: str = "",
+    group_id: int = 0,
+    client: httpx.Client | None = None,
+) -> dict[str, Any]:
+    """Let Sub2API own PKCE/token exchange and create the Grok OAuth account."""
+    base = str(base_url or "").strip().rstrip("/")
+    owned = client is None
+    http = client or httpx.Client(timeout=60.0)
+    try:
+        auth_headers, error = _sub2api_auth_headers(
+            http,
+            base=base,
+            api_key=api_key,
+            auth_mode=auth_mode,
+            admin_email=admin_email,
+            admin_password=admin_password,
+        )
+        if error:
+            return error
+        headers = {**(auth_headers or {}), "Content-Type": "application/json"}
+        auth_response = http.post(
+            f"{base}/api/v1/admin/grok/oauth/auth-url",
+            headers=headers,
+            json={},
+        )
+        if auth_response.status_code >= 300:
+            return {
+                "ok": False,
+                "target": "sub2api",
+                "stage": "auth_url",
+                "status_code": auth_response.status_code,
+                "error": f"Sub2API 生成 Grok 授权链接失败：{_error_text(auth_response)}",
+            }
+        auth_payload = auth_response.json()
+        auth_data = (
+            auth_payload.get("data")
+            if isinstance(auth_payload, dict)
+            and isinstance(auth_payload.get("data"), dict)
+            else auth_payload
+        )
+        auth_url = str(auth_data.get("auth_url") or "") if isinstance(auth_data, dict) else ""
+        session_id = str(auth_data.get("session_id") or "") if isinstance(auth_data, dict) else ""
+        state = str(auth_data.get("state") or "") if isinstance(auth_data, dict) else ""
+        if not auth_url or not session_id or not state:
+            return {
+                "ok": False,
+                "target": "sub2api",
+                "stage": "auth_url",
+                "error": "Sub2API Grok 授权链接响应缺少 auth_url、session_id 或 state",
+            }
+
+        callback_input = str(authorize(auth_url, state) or "").strip()
+        if not callback_input:
+            return {
+                "ok": False,
+                "target": "sub2api",
+                "stage": "browser_authorize",
+                "error": "浏览器完成 Sub2API Grok 授权后未取得回调地址或授权码",
+            }
+
+        selected_group_id = int(group_id or 0)
+        create_response = http.post(
+            f"{base}/api/v1/admin/grok/oauth/create-from-oauth",
+            headers=headers,
+            json={
+                "session_id": session_id,
+                "code": callback_input,
+                "state": state,
+                "name": str(email or "").strip().lower() or "Grok OAuth Account",
+                "concurrency": 1,
+                "priority": 50,
+                "group_ids": [selected_group_id] if selected_group_id else [],
+            },
+        )
+        if create_response.status_code >= 300:
+            return {
+                "ok": False,
+                "target": "sub2api",
+                "stage": "create_account",
+                "status_code": create_response.status_code,
+                "error": f"Sub2API 回填 Grok 授权码失败：{_error_text(create_response)}",
+            }
+        create_payload = create_response.json()
+        account = (
+            create_payload.get("data")
+            if isinstance(create_payload, dict)
+            and isinstance(create_payload.get("data"), dict)
+            else create_payload
+        )
+        account_id = account.get("id") if isinstance(account, dict) else None
+        if not account_id:
+            return {
+                "ok": False,
+                "target": "sub2api",
+                "stage": "create_account",
+                "error": "Sub2API 返回授权成功，但响应中没有账号 ID",
+            }
+        return {
+            "ok": True,
+            "target": "sub2api",
+            "status_code": create_response.status_code,
+            "account_id": account_id,
+            "email": str(account.get("name") or email or "").strip().lower(),
+            "group_id": selected_group_id or None,
+            "path": "grok_oauth_callback",
+        }
+    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
+        return {
+            "ok": False,
+            "target": "sub2api",
+            "error": f"Sub2API Grok OAuth 网络错误：{str(exc)[:220]}",
+        }
+    finally:
+        if owned:
+            http.close()
+
+
+def probe_grok_account_in_sub2api(
+    account_id: str | int,
+    *,
+    model: str,
+    base_url: str,
+    api_key: str = "",
+    auth_mode: str = "password",
+    admin_email: str = "",
+    admin_password: str = "",
+    client: httpx.Client | None = None,
+) -> dict[str, Any]:
+    """Use Sub2API's real account-test stream for callback-imported accounts."""
+    base = str(base_url or "").strip().rstrip("/")
+    owned = client is None
+    http = client or httpx.Client(timeout=90.0)
+    try:
+        auth_headers, error = _sub2api_auth_headers(
+            http,
+            base=base,
+            api_key=api_key,
+            auth_mode=auth_mode,
+            admin_email=admin_email,
+            admin_password=admin_password,
+        )
+        if error:
+            return error
+        response = http.post(
+            f"{base}/api/v1/admin/accounts/{account_id}/test",
+            headers={**(auth_headers or {}), "Content-Type": "application/json"},
+            json={"model_id": str(model or "grok-4.5"), "prompt": "hi"},
+        )
+        if response.status_code >= 300:
+            return {
+                "ok": False,
+                "available": False,
+                "target": "sub2api",
+                "status_code": response.status_code,
+                "error": _error_text(response),
+            }
+        response_text = ""
+        error_text = ""
+        completed = False
+        for raw_line in response.text.splitlines():
+            line = raw_line.strip()
+            if not line.startswith("data:"):
+                continue
+            try:
+                event = json.loads(line.split(":", 1)[1].strip())
+            except (ValueError, IndexError):
+                continue
+            if not isinstance(event, dict):
+                continue
+            event_type = str(event.get("type") or "").lower()
+            if event_type == "content" and event.get("text"):
+                response_text += str(event.get("text"))
+            elif event_type == "error":
+                error_text = str(event.get("error") or "Sub2API 账号测试失败")
+            elif event_type == "test_complete" and event.get("success") is True:
+                completed = True
+        if error_text:
+            return {
+                "ok": False,
+                "available": False,
+                "target": "sub2api",
+                "error": error_text[:420],
+            }
+        if not completed:
+            return {
+                "ok": False,
+                "available": False,
+                "target": "sub2api",
+                "error": "Sub2API 账号测试未返回完成事件",
+            }
+        return {
+            "ok": True,
+            "available": True,
+            "target": "sub2api",
+            "response": response_text[:420],
+        }
+    except (httpx.HTTPError, ValueError) as exc:
+        return {
+            "ok": False,
+            "available": False,
+            "target": "sub2api",
+            "error": f"Sub2API 账号测试网络错误：{str(exc)[:220]}",
+        }
+    finally:
+        if owned:
+            http.close()
 
 
 def import_chatgpt_to_sub2api(

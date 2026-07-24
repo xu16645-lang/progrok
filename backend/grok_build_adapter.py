@@ -83,7 +83,7 @@ BACKEND_DIR = Path(__file__).resolve().parent
 APP_DIR = BACKEND_DIR.parent
 RUNTIME_DATA_DIR = APP_DIR / "runtime" / "data"
 GBA = APP_DIR / "vendor" / "grok-build-auth"
-ADAPTER_BUILD = "2026-07-24-xai-browser-registration-1"
+ADAPTER_BUILD = "2026-07-24-sub2-oauth-callback-2"
 # Newly registered accounts often need a short settle window before probe.
 REGISTER_PROBE_DELAY_SEC = float(
     os.environ.get("GROK2API_REG_PROBE_DELAY_SEC", "30") or 30
