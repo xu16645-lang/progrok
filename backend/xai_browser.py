@@ -2,12 +2,51 @@
 from __future__ import annotations
 
 import re
+import secrets
 import time
 from typing import Any, Callable
 
 
 XAI_SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
 XAI_GROK_URL = "https://grok.com/"
+PASSWORD_SUBMIT_DELAY_MS = 5_000
+PAGE_SETTLE_DELAY_MS = 600
+
+_FIRST_NAMES = (
+    "Aiden",
+    "Caleb",
+    "Ethan",
+    "Lucas",
+    "Mason",
+    "Nolan",
+    "Owen",
+    "Ryan",
+    "Sophie",
+    "Chloe",
+    "Emma",
+    "Grace",
+    "Mia",
+    "Nora",
+    "Ruby",
+    "Zoe",
+)
+_LAST_NAMES = (
+    "Bennett",
+    "Carter",
+    "Collins",
+    "Foster",
+    "Hayes",
+    "Morgan",
+    "Parker",
+    "Reed",
+    "Ross",
+    "Scott",
+    "Turner",
+    "Walker",
+    "Ward",
+    "Wells",
+    "Young",
+)
 
 
 def _ensure_camoufox() -> None:
@@ -170,6 +209,25 @@ class XaiVisibleRegistration:
     def _action_delay(self) -> None:
         self._wait(self.operation_delay_ms)
 
+    def _settle_page(self) -> None:
+        """Wait for navigation and rendering without requiring permanent network idleness."""
+        self._check_cancel()
+        if self.page is None:
+            return
+        self._wait(250)
+        for state, timeout in (("domcontentloaded", 5_000), ("networkidle", 2_000)):
+            self._check_cancel()
+            try:
+                self.page.wait_for_load_state(state, timeout=timeout)
+            except Exception:
+                # xAI keeps background requests open, so networkidle is best effort.
+                pass
+        self._wait(PAGE_SETTLE_DELAY_MS)
+
+    @staticmethod
+    def _generate_profile() -> tuple[str, str]:
+        return secrets.choice(_FIRST_NAMES), secrets.choice(_LAST_NAMES)
+
     def _enforce_visible_window(self) -> None:
         if self.headless or self.page is None:
             return
@@ -219,7 +277,7 @@ class XaiVisibleRegistration:
             self._progress("navigate", "loading")
             self._action_delay()
             self.page.goto(XAI_SIGNUP_URL, wait_until="domcontentloaded", timeout=45_000)
-            self._wait(800)
+            self._settle_page()
             self._enforce_visible_window()
             self._progress("navigate", "ready")
         except (XaiBrowserCancelled, XaiBrowserError):
@@ -387,6 +445,8 @@ class XaiVisibleRegistration:
         acted: set[str] = set()
         used_codes: set[str] = set()
         last_code = ""
+        first_name_value, last_name_value = self._generate_profile()
+        self._progress("profile", "generated")
         while True:
             self._check_cancel()
             sso, cookies = self._extract_sso()
@@ -414,7 +474,7 @@ class XaiVisibleRegistration:
                     raise XaiBrowserError("未找到 xAI 邮箱注册入口")
                 acted.add("signup_method")
                 self._progress("signup_method", "selected")
-                self._wait(800)
+                self._settle_page()
                 continue
 
             verification = self._verification_target()
@@ -445,7 +505,7 @@ class XaiVisibleRegistration:
                     self._submit(anchor, "verify|confirm|continue|submit|验证|确认|继续")
                     self._progress(stage, "submitted")
                     acted.add(stage)
-                    self._wait(1_000)
+                    self._settle_page()
                     continue
 
                 text = self._page_text()
@@ -464,7 +524,7 @@ class XaiVisibleRegistration:
                     if len(value) != 6 or value == last_code:
                         raise XaiBrowserError("xAI 未收到新的有效邮箱验证码")
                     acted.discard(stage)
-                    self._wait(800)
+                    self._settle_page()
                     continue
 
             email_input = self._first_visible(
@@ -488,6 +548,16 @@ class XaiVisibleRegistration:
             last_name = self._first_visible(
                 ['input[name*="last" i]', 'input[name*="family" i]']
             )
+            full_name = None
+            if first_name is None and last_name is None:
+                full_name = self._first_visible(
+                    [
+                        'input[name="name"]',
+                        'input[name*="fullName" i]',
+                        'input[name*="displayName" i]',
+                        'input[autocomplete="name"]',
+                    ]
+                )
 
             stage_parts: list[str] = []
             anchor = None
@@ -498,6 +568,22 @@ class XaiVisibleRegistration:
                     self._action_delay()
                     email_input.fill(email)
                     anchor = email_input
+            if first_name is not None or last_name is not None or full_name is not None:
+                stage_parts.append("profile")
+                if "profile" not in acted:
+                    self._progress("profile", "filling")
+                    self._action_delay()
+                    if first_name is not None:
+                        first_name.fill(first_name_value)
+                        anchor = first_name
+                    if last_name is not None:
+                        last_name.fill(last_name_value)
+                        anchor = last_name
+                    if full_name is not None:
+                        full_name.fill(f"{first_name_value} {last_name_value}")
+                        anchor = full_name
+                    self._progress("profile", "filled")
+            password_was_filled = False
             if password_input is not None:
                 stage_parts.append("password")
                 if "password" not in acted:
@@ -505,28 +591,22 @@ class XaiVisibleRegistration:
                     self._action_delay()
                     password_input.fill(password)
                     anchor = password_input
-            if first_name is not None or last_name is not None:
-                stage_parts.append("profile")
-                if "profile" not in acted:
-                    self._progress("profile", "filling")
-                    self._action_delay()
-                    if first_name is not None:
-                        first_name.fill("User")
-                        anchor = first_name
-                    if last_name is not None:
-                        last_name.fill("Grok")
-                        anchor = last_name
+                    password_was_filled = True
+                    self._progress("password", "filled")
 
             pending = [part for part in stage_parts if part not in acted]
             if pending:
+                if password_was_filled:
+                    self._progress("password", "waiting_before_submit")
+                    self._wait(PASSWORD_SUBMIT_DELAY_MS)
                 self._submit(
                     anchor,
-                    "continue|next|sign up|create account|submit|继续|下一步|创建",
+                    "complete sign up|continue|next|sign up|create account|submit|继续|下一步|创建",
                 )
                 for part in pending:
                     acted.add(part)
                     self._progress(part, "submitted")
-                self._wait(1_000)
+                self._settle_page()
                 continue
 
             if str(self.page.url or "").startswith(XAI_GROK_URL):

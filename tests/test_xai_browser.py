@@ -14,7 +14,12 @@ import app
 import grok_build_adapter as grok_adapter
 import sso_to_auth_json
 from grok_build_adapter import _make_email_receiver, _snapshot_reg_config
-from xai_browser import XAI_SIGNUP_URL, XaiBrowserRuntime, XaiVisibleRegistration
+from xai_browser import (
+    PASSWORD_SUBMIT_DELAY_MS,
+    XAI_SIGNUP_URL,
+    XaiBrowserRuntime,
+    XaiVisibleRegistration,
+)
 
 
 class _Page:
@@ -22,6 +27,7 @@ class _Page:
         self.gotos = []
         self.viewport = None
         self.closed = False
+        self.url = XAI_SIGNUP_URL
 
     def goto(self, url, **kwargs):
         self.gotos.append((url, kwargs))
@@ -81,6 +87,54 @@ class _Runtime:
 
 
 class XaiBrowserTests(unittest.TestCase):
+    def test_generated_profile_is_not_the_old_fixed_placeholder(self):
+        with patch("xai_browser.secrets.choice", side_effect=["Aiden", "Carter"]):
+            generated = XaiVisibleRegistration._generate_profile()
+
+        self.assertEqual(generated, ("Aiden", "Carter"))
+        self.assertNotEqual(generated, ("User", "Grok"))
+
+    def test_profile_is_filled_before_password_and_submit_waits_five_seconds(self):
+        events = []
+
+        class _Input:
+            def __init__(self, name):
+                self.name = name
+
+            def fill(self, value):
+                events.append(("fill", self.name, value))
+
+        visual = XaiVisibleRegistration(on_progress=lambda _message: None)
+        visual.page = _Page()
+        targets = [None, _Input("password"), _Input("first"), _Input("last")]
+        sso_results = [(None, {}), ("sso-token", {"sso": "sso-token"})]
+
+        with (
+            patch.object(visual, "open"),
+            patch.object(visual, "_extract_sso", side_effect=sso_results),
+            patch.object(visual, "_first_visible", side_effect=targets),
+            patch.object(visual, "_verification_target", return_value=None),
+            patch.object(visual, "_raise_page_error"),
+            patch.object(visual, "_action_delay"),
+            patch.object(visual, "_wait", side_effect=lambda ms: events.append(("wait", ms))),
+            patch.object(visual, "_settle_page", side_effect=lambda: events.append(("settle",))),
+            patch.object(visual, "_submit", side_effect=lambda *_args: events.append(("submit",))),
+        ):
+            result = visual.register_account(
+                email="person@example.test",
+                password="random-password",
+                get_verification_code=lambda *_args: None,
+            )
+
+        fill_names = [event[1] for event in events if event[0] == "fill"]
+        self.assertEqual(fill_names, ["first", "last", "password"])
+        password_fill = events.index(("fill", "password", "random-password"))
+        wait = events.index(("wait", PASSWORD_SUBMIT_DELAY_MS))
+        submit = events.index(("submit",))
+        self.assertLess(password_fill, wait)
+        self.assertLess(wait, submit)
+        self.assertTrue(result["ok"])
+
     def test_grok_monitor_projection_redacts_runtime_fields(self):
         session = {
             "id": "session-1",
