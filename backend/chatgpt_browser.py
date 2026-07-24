@@ -1,6 +1,6 @@
 """ChatGPT browser automation core for account registration.
 
-Uses patchright (Playwright-compatible sync API) to:
+Uses Camoufox to:
 1. Open chatgpt.com and start signup with email
 2. Wait for email verification code (via external receiver callback)
 3. Fill in name and birthdate
@@ -28,29 +28,14 @@ from urllib.parse import urlparse
 from chatgpt_browser_context import BrowserContext
 import chatgpt_browser_registration as _registration
 
-# Deferred import — patchright may only be installed in the solver venv.
-_sync_playwright: Any = None
-
-
-def _ensure_playwright() -> None:
-    """Lazy-import patchright.sync_api so the module loads even without it."""
-    global _sync_playwright
-    if _sync_playwright is not None:
-        return
+def _ensure_camoufox() -> None:
+    """Lazy-import Camoufox so the module can report a clear startup error."""
     try:
-        from patchright.sync_api import sync_playwright
+        from camoufox.sync_api import Camoufox
 
-        _sync_playwright = sync_playwright
-    except ImportError:
-        try:
-            from playwright.sync_api import sync_playwright
-
-            _sync_playwright = sync_playwright
-        except ImportError:
-            raise RuntimeError(
-                "patchright 或 playwright 未安装。请执行: pip install patchright && "
-                "patchright install chromium 或 pip install playwright && playwright install chromium"
-            )
+        del Camoufox
+    except ImportError as exc:
+        raise RuntimeError("Camoufox 未安装，请安装项目浏览器依赖后重试") from exc
 
 
 # --------------------------------------------------------------------------- #
@@ -661,7 +646,6 @@ class ChatGPTBrowserRuntime:
     def __init__(self) -> None:
         self.browser: Any = None
         self.camoufox_manager: Any = None
-        self.playwright: Any = None
         self.using_camoufox = False
         self.headless = True
         self.proxy_key = ""
@@ -688,29 +672,16 @@ class ChatGPTBrowserRuntime:
                 browser_alive = bool(self.browser.is_connected())
         except Exception:
             browser_alive = False
-        proxy_matches = self.proxy_key == key or not self.using_camoufox
-        if browser_alive and self.headless == headless and proxy_matches:
+        if browser_alive and self.headless == headless and self.proxy_key == key:
             self.proxy_key = key
             return self.browser, self.using_camoufox, True
 
         self.close()
-        _ensure_playwright()
+        _ensure_camoufox()
         self.headless = headless
         self.proxy_key = key
         debug_window_width = 800
         debug_window_height = 560
-        launch_args = [
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            "--disable-web-security",
-            "--disable-features=IsolateOrigins,site-per-process",
-        ]
-        if not headless:
-            launch_args.append(
-                f"--window-size={debug_window_width},{debug_window_height}"
-            )
-
         try:
             from camoufox.sync_api import Camoufox
 
@@ -724,7 +695,7 @@ class ChatGPTBrowserRuntime:
             self.using_camoufox = True
             if on_launched:
                 on_launched("launched_camoufox")
-        except Exception:
+        except Exception as exc:
             try:
                 if self.camoufox_manager:
                     self.camoufox_manager.__exit__(None, None, None)
@@ -732,12 +703,7 @@ class ChatGPTBrowserRuntime:
                 pass
             self.camoufox_manager = None
             self.browser = None
-            self.playwright = _sync_playwright().start()
-            launch_kwargs: dict[str, Any] = {"headless": headless, "args": launch_args}
-            self.browser = self.playwright.chromium.launch(**launch_kwargs)
-            self.using_camoufox = False
-            if on_launched:
-                on_launched("launched_chromium")
+            raise RuntimeError(f"Camoufox 启动失败：{exc}") from exc
         return self.browser, self.using_camoufox, False
 
     def close(self) -> None:
@@ -748,14 +714,8 @@ class ChatGPTBrowserRuntime:
                 self.browser.close()
         except Exception:
             pass
-        try:
-            if self.playwright:
-                self.playwright.stop()
-        except Exception:
-            pass
         self.browser = None
         self.camoufox_manager = None
-        self.playwright = None
         self.using_camoufox = False
         self.proxy_key = ""
 

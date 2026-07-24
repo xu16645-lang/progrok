@@ -48,7 +48,7 @@ def register_chatgpt_account(
     -------
     dict with keys: ok, session, email, error, steps
     """
-    ctx._ensure_playwright()
+    ctx._ensure_camoufox()
     deadline = ctx.time.time() + timeout_sec
     steps: list[dict[str, Any]] = []
 

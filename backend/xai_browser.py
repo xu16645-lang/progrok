@@ -6,29 +6,17 @@ import time
 from typing import Any, Callable
 
 
-_sync_playwright: Any = None
-
 XAI_SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
 XAI_GROK_URL = "https://grok.com/"
 
 
-def _ensure_playwright() -> None:
-    global _sync_playwright
-    if _sync_playwright is not None:
-        return
+def _ensure_camoufox() -> None:
     try:
-        from patchright.sync_api import sync_playwright
+        from camoufox.sync_api import Camoufox
 
-        _sync_playwright = sync_playwright
-    except ImportError:
-        try:
-            from playwright.sync_api import sync_playwright
-
-            _sync_playwright = sync_playwright
-        except ImportError as exc:
-            raise RuntimeError(
-                "xAI 浏览器注册需要 patchright 或 playwright，请先安装项目依赖"
-            ) from exc
+        del Camoufox
+    except ImportError as exc:
+        raise RuntimeError("xAI 浏览器注册需要 Camoufox，请先安装项目依赖") from exc
 
 
 class XaiBrowserError(RuntimeError):
@@ -45,7 +33,6 @@ class XaiBrowserRuntime:
     def __init__(self) -> None:
         self.browser: Any = None
         self.camoufox_manager: Any = None
-        self.playwright: Any = None
         self.using_camoufox = False
         self.headless = True
         self.proxy_key = ""
@@ -72,22 +59,15 @@ class XaiBrowserRuntime:
                 browser_alive = bool(self.browser.is_connected())
         except Exception:
             browser_alive = False
-        proxy_matches = self.proxy_key == key or not self.using_camoufox
-        if browser_alive and self.headless == headless and proxy_matches:
+        if browser_alive and self.headless == headless and self.proxy_key == key:
             self.proxy_key = key
             return self.browser, self.using_camoufox, True
 
         self.close()
-        _ensure_playwright()
+        _ensure_camoufox()
         self.headless = headless
         self.proxy_key = key
         width, height = 800, 560
-        launch_args = [
-            "--disable-blink-features=AutomationControlled",
-            "--no-sandbox",
-            "--disable-dev-shm-usage",
-            f"--window-size={width},{height}",
-        ]
         try:
             from camoufox.sync_api import Camoufox
 
@@ -102,20 +82,15 @@ class XaiBrowserRuntime:
             self.using_camoufox = True
             if on_launched:
                 on_launched("launched_camoufox")
-        except Exception:
+        except Exception as exc:
             try:
                 if self.camoufox_manager:
                     self.camoufox_manager.__exit__(None, None, None)
             except Exception:
                 pass
             self.camoufox_manager = None
-            self.playwright = _sync_playwright().start()
-            self.browser = self.playwright.chromium.launch(
-                headless=headless, args=launch_args
-            )
-            self.using_camoufox = False
-            if on_launched:
-                on_launched("launched_chromium")
+            self.browser = None
+            raise XaiBrowserError(f"Camoufox 启动失败：{exc}") from exc
         return self.browser, self.using_camoufox, False
 
     def close(self) -> None:
@@ -126,14 +101,8 @@ class XaiBrowserRuntime:
                 self.browser.close()
         except Exception:
             pass
-        try:
-            if self.playwright:
-                self.playwright.stop()
-        except Exception:
-            pass
         self.browser = None
         self.camoufox_manager = None
-        self.playwright = None
         self.using_camoufox = False
         self.proxy_key = ""
 

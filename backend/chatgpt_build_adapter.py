@@ -249,9 +249,9 @@ def registration_available() -> dict[str, Any]:
 
     # Check browser availability
     try:
-        from chatgpt_browser import _ensure_playwright
+        from chatgpt_browser import _ensure_camoufox
 
-        _ensure_playwright()
+        _ensure_camoufox()
         _adapter_ready = True
         _adapter_error = None
     except Exception as e:

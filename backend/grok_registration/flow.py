@@ -226,9 +226,9 @@ def start_registration(
     job picks one entry via ``proxy_strategy`` (round_robin / random / sticky).
     """
     try:
-        from xai_browser import _ensure_playwright
+        from xai_browser import _ensure_camoufox
 
-        _ensure_playwright()
+        _ensure_camoufox()
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e)}
 

@@ -256,9 +256,9 @@ def wait_for_local_solver(
 
 def registration_available() -> dict[str, Any]:
     try:
-        from xai_browser import _ensure_playwright
+        from xai_browser import _ensure_camoufox
 
-        _ensure_playwright()
+        _ensure_camoufox()
         return {
             "ok": True,
             "available": True,
