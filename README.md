@@ -1,6 +1,6 @@
 # ProGrok 浏览器注册工具
 
-ProGrok 是面向 Windows 的本地 Web 工具，用于执行 Grok（xAI）浏览器注册、微软/自定义邮箱接码、账号凭证保存、账号探活以及 CPA/Sub2API 导入。服务默认只监听 `127.0.0.1`，不依赖 PostgreSQL 或 Redis。
+ProGrok 是面向 Windows 的本地 Web 工具，用于执行 Grok（xAI）浏览器注册、微软/自定义邮箱接码、账号凭证保存、账号探活以及 CPA/Sub2API 导入。服务默认只监听 `127.0.0.1`。
 
 > 仅可在你有权使用的邮箱、代理、账号和站点上运行，并遵守相关服务条款。账号文件、Token、Cookie、邮箱凭据和管理密钥均属于敏感信息，请勿公开上传。
 
@@ -8,7 +8,6 @@ ProGrok 是面向 Windows 的本地 Web 工具，用于执行 Grok（xAI）浏�
 
 - 当前注册目标：Grok（xAI）。
 - 当前注册方式：浏览器注册。
-- ChatGPT 注册、半协议注册和 ChatGPT Agent Identity 下载入口暂时停用，相关代码保留以便后续恢复。
 - 邮箱入口仅保留“自定义”和“微软邮箱账户池（本地助手）”。
 - 支持 CPA JSON、Sub2API JSON 生成和站点导入。
 - 支持注册后探活、账号轮询、批量探活和自动半小时轮询。
@@ -167,18 +166,8 @@ Sub2API 导入账号容量默认使用 `3`。导入任务在单个账号准备�
 - CPA JSON。
 - Sub2API JSON。
 
-ChatGPT Agent Identity auth.json 下载当前不可选。所有下载内容都可能包含敏感凭据。
+ChatGPT Agent Identity auth.json 下载当前不可选。所有下载内容都可能包含敏感凭据，请勿随意发送。
 
-## 配置与数据安全
-
-页面配置保存到 `config/config.json`，包括邮箱密钥、代理密码、CPA/Sub2API 管理凭据等。该文件已被 Git 忽略。
-
-以下内容不会进入源码仓库或发布包：
-
-- `config/config.json`、`.env`。
-- `runtime/`、`data/`、`output/`、`artifacts/`。
-- 浏览器缓存、虚拟环境和测试输出。
-- Token、Cookie、SSO、账号文件、邮箱凭据、API Key 和管理密钥。
 
 ## 测试
 
@@ -222,11 +211,3 @@ Get-Content .\runtime\logs\app.err.log -Tail 100
 ### 导入或探活失败
 
 先查看日志中的上游 HTTP 状态和错误信息。`401/403` 通常表示凭证或授权不可用，`429` 表示限流。探活失败与注册失败分别统计，凭证失效不会被计为注册失败。
-
-### 分享日志
-
-分享前必须删除邮箱、密码、代理、Token、Cookie、SSO、API Key 和站点管理凭据。
-
-## 来源与许可
-
-本项目基于 [HM2899/grokcli-2api](https://github.com/HM2899/grokcli-2api) 的注册能力进行二次开发，并内置项目运行所需的第三方组件。第三方组件的许可和 NOTICE 文件随发布包保留。
