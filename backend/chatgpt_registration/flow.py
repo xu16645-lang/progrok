@@ -73,6 +73,7 @@ def _prepare_registration_session(
         "batch_total": batch_total,
         "_receiver": receiver,
         "_hotmail_account_id": getattr(receiver, "account_id", None),
+        "_hotmail_alias_index": getattr(receiver, "alias_index", None),
         "_post_registration": dict(post_registration or {}),
         "_headless": headless,
     }

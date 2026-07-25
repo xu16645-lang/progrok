@@ -685,6 +685,7 @@ class HotmailHelperHandler(BaseHTTPRequestHandler):
                     payload.get("requiredKeywords") or [],
                     payload.get("codePatterns") or [],
                     bool(payload.get("allowTimeFallback", True)),
+                    payload.get("recipientFilters") or [],
                 )
                 json_response(
                     self,

@@ -3,6 +3,7 @@ from __future__ import annotations
 import sys
 import tempfile
 import unittest
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -15,6 +16,48 @@ import registration_state
 
 
 class RegistrationStateTests(unittest.TestCase):
+    def test_concurrent_saves_use_distinct_temporary_files(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            registration_state, "STATE_DIR", Path(tmp)
+        ):
+            def save(index: int) -> None:
+                registration_state.save_state(
+                    "grok",
+                    {f"session-{index}": {"id": f"session-{index}", "status": "done"}},
+                    {},
+                )
+
+            with ThreadPoolExecutor(max_workers=16) as pool:
+                list(pool.map(save, range(100)))
+
+            state_file = Path(tmp) / "grok.json"
+            self.assertTrue(state_file.is_file())
+            self.assertFalse(list(Path(tmp).glob("grok.tmp.*")))
+            sessions, batches = registration_state.load_state("grok")
+            self.assertEqual(len(sessions), 1)
+            self.assertEqual(batches, {})
+
+    def test_save_retries_transient_windows_replace_lock(self):
+        with tempfile.TemporaryDirectory() as tmp, patch.object(
+            registration_state, "STATE_DIR", Path(tmp)
+        ), patch.object(
+            registration_state, "_REPLACE_RETRY_DELAYS", (0.0, 0.0)
+        ):
+            real_replace = registration_state.os.replace
+            attempts = []
+
+            def replace(source, target):
+                attempts.append((source, target))
+                if len(attempts) < 3:
+                    raise PermissionError("target temporarily locked")
+                return real_replace(source, target)
+
+            with patch.object(registration_state.os, "replace", side_effect=replace):
+                registration_state.save_state("grok", {}, {})
+
+            self.assertEqual(len(attempts), 3)
+            self.assertTrue((Path(tmp) / "grok.json").is_file())
+
     def test_state_survives_reload_and_strips_secrets(self):
         with tempfile.TemporaryDirectory() as tmp, patch.object(
             registration_state, "STATE_DIR", Path(tmp)

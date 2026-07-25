@@ -5,6 +5,16 @@ from __future__ import annotations
 from typing import Any
 
 
+def _missing_token_fields(data: Any) -> list[str]:
+    if not isinstance(data, dict):
+        return ["access_token", "refresh_token"]
+    return [
+        field
+        for field in ("access_token", "refresh_token")
+        if not str(data.get(field) or "").strip()
+    ]
+
+
 def request_device_code(
     ctx,
     session: Any | None = None,
@@ -162,14 +172,18 @@ def poll_token(
                 status = int(getattr(response, "status_code", 0) or 0)
                 if status < 400:
                     data = response.json()
-                    if isinstance(data, dict) and data.get("access_token"):
+                    missing_fields = _missing_token_fields(data)
+                    if not missing_fields:
                         if failure is not None:
                             failure.clear()
                         return data
                     ctx._record_failure(
                         failure,
                         stage="token_poll",
-                        detail="token response did not include access_token",
+                        detail=(
+                            "token response missing required field(s): "
+                            + ", ".join(missing_fields)
+                        ),
                     )
                     return None
                 try:
@@ -215,14 +229,18 @@ def poll_token(
         try:
             with ctx.urllib.request.urlopen(request, timeout=http_timeout) as response:
                 data = ctx.json.loads(response.read())
-                if isinstance(data, dict) and data.get("access_token"):
+                missing_fields = _missing_token_fields(data)
+                if not missing_fields:
                     if failure is not None:
                         failure.clear()
                     return data
                 ctx._record_failure(
                     failure,
                     stage="token_poll",
-                    detail="token response did not include access_token",
+                    detail=(
+                        "token response missing required field(s): "
+                        + ", ".join(missing_fields)
+                    ),
                 )
                 return None
         except ctx.urllib.error.HTTPError as exc:

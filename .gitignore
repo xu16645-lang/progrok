@@ -2,9 +2,12 @@ runtime/
 vendor/turnstile-solver/.venv/
 vendor/turnstile-solver/proxies.txt
 vendor/turnstile-solver/proxies.txt.tmp
+vendor/sub2api-latest/
+vendor/**/__pycache__/
 __pycache__/
 *.pyc
 *.pid
+*.log
 .env
 config/config.json
 config/config.json.tmp
@@ -15,3 +18,11 @@ config/config.json.tmp
 artifacts/
 vendor/grok-build-auth/sso_output/*
 .playwright-cli/
+.wrangler/
+.zcode/
+data/
+deploy/
+output/
+test-results/
+.pytest_cache/
+.ruff_cache/

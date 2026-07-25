@@ -91,51 +91,70 @@ def _retry_probe_now(
     results: list[dict[str, Any]] = []
     config = dict(sess.get("_post_registration") or {})
     config.update(dict(post_registration or {}))
+
+    def append_probe_event(status: str, message: str) -> None:
+        with ctx._lock:
+            current = ctx._sessions.get(sid) or ctx._load_reg_sess(sid) or dict(sess)
+            current["updated_at"] = ctx._now()
+            ctx._append_session_event(
+                current, status, message, at=current["updated_at"]
+            )
+            ctx._sessions[sid] = current
+            ctx._mirror_reg_sess(sid, current)
+
     try:
-        import model_health
+        import account_rotation
 
         model = str(config.get("model") or "grok-4.5")
         for account_id in account_ids:
             try:
-                if not ctx.wait_pipeline_stagger(
-                    "probe",
-                    config.get("probe_stagger_ms") or 0,
-                    should_cancel=lambda: ctx._session_pause_requested(
-                        ctx._load_reg_sess(sid) or {}
-                    ),
-                ):
+                if ctx._session_pause_requested(ctx._load_reg_sess(sid) or {}):
                     ctx._mark_pipeline_paused(sid)
                     return {"ok": False, "paused": True, "error": "batch paused"}
-                response = model_health.probe_single_account(
-                    account_id,
-                    model,
-                    auto_disable=True,
-                    source="manual_retry" if manual_retry else "register_queue",
+                append_probe_event(
+                    "probe_request",
+                    f"测活上游请求：POST /responses，模型 {model}，输入 hi",
                 )
-                detail = response.get("result") if isinstance(response, dict) else {}
-                if not isinstance(detail, dict):
-                    detail = {}
-                error = detail.get("error") or response.get("error") or ""
-                results.append(
-                    {
-                        "account_id": account_id,
-                        "ok": bool(response.get("ok")),
-                        "model": detail.get("model") or model,
-                        "status_code": detail.get("status_code"),
-                        "latency_ms": detail.get("latency_ms"),
-                        "retryable": bool(detail.get("retryable")),
-                        "classification": detail.get("classification"),
-                        "fallback": detail.get("fallback"),
-                        "degraded": bool(detail.get("degraded")),
-                        "chat_ready": detail.get("chat_ready"),
-                        "message": detail.get("message"),
-                        "error": str(error)[:180] if error else None,
-                    }
+                response = account_rotation.probe_registration_account(
+                    "xai",
+                    email=str(sess.get("email") or ""),
+                    account_id=account_id,
+                    session_id=sid,
+                    session_file=str(sess.get("session_file") or ""),
+                    config=config,
+                )
+                detail = response if isinstance(response, dict) else {}
+                error = detail.get("error") or detail.get("message") or ""
+                item = {
+                    "account_id": account_id,
+                    "ok": bool(detail.get("ok") or detail.get("available") is True),
+                    "available": detail.get("available"),
+                    "model": detail.get("model") or model,
+                    "status_code": detail.get("status_code"),
+                    "latency_ms": detail.get("latency_ms"),
+                    "retry_count": int(detail.get("retry_count") or 0),
+                    "retryable": bool(detail.get("retryable")),
+                    "classification": detail.get("classification"),
+                    "fallback": detail.get("fallback"),
+                    "degraded": bool(detail.get("degraded")),
+                    "chat_ready": detail.get("chat_ready"),
+                    "message": detail.get("message"),
+                    "reply": str(detail.get("reply") or "")[:180] or None,
+                    "error": str(error)[:180] if error else None,
+                }
+                results.append(item)
+                status_text = f"HTTP {item['status_code']}" if item.get("status_code") else "无 HTTP 状态"
+                latency_text = f"，耗时 {item['latency_ms']}ms" if item.get("latency_ms") is not None else ""
+                retry_text = f"，权限传播重试 {item['retry_count']} 次" if item.get("retry_count") else ""
+                reply_text = item.get("reply") or item.get("message") or item.get("error") or "上游未返回内容"
+                append_probe_event(
+                    "probe_response" if item["ok"] else "probe_response_failed",
+                    f"测活上游回复：{status_text}{latency_text}{retry_text}，{str(reply_text)[:180]}",
                 )
             except Exception as exc:
-                results.append(
-                    {"account_id": account_id, "ok": False, "error": str(exc)[:180]}
-                )
+                error = str(exc)[:180]
+                results.append({"account_id": account_id, "ok": False, "error": error})
+                append_probe_event("probe_response_failed", f"测活上游回复：请求异常，{error}")
     except Exception as exc:
         results.append({"account_id": None, "ok": False, "error": str(exc)[:180]})
     uncertain = sum(
@@ -194,6 +213,62 @@ def _retry_probe_now(
         )
         ctx._sessions[sid] = current
         ctx._mirror_reg_sess(sid, current)
+    pre_import_probe = bool(config.get("pre_import_probe_enabled", True))
+    auto_import = bool(config.get("auto_import_enabled"))
+    probe_succeeded = summary["fail"] == 0 and summary["uncertain"] == 0
+    if pre_import_probe and auto_import and summary["state"] not in {
+        "retry_pending",
+        "uncertain",
+    }:
+        if probe_succeeded:
+            with ctx._lock:
+                current = ctx._sessions.get(sid) or dict(sess)
+                current["status"] = "converted"
+                current["error"] = None
+                pending_import = dict(current.get("auto_import") or {})
+                pending_import["waiting_for_probe"] = False
+                pending_import["queued"] = True
+                current["auto_import"] = pending_import
+                current["updated_at"] = ctx._now()
+                ctx._sessions[sid] = current
+                ctx._mirror_reg_sess(sid, current)
+            ctx._enqueue_pipeline_phase(sid, "import")
+        else:
+            error = next(
+                (
+                    str(item.get("error") or item.get("message") or "").strip()
+                    for item in results
+                    if not item.get("ok")
+                ),
+                "账号请求上游失败",
+            )
+            error = error or "账号请求上游失败"
+            with ctx._lock:
+                current = ctx._sessions.get(sid) or dict(sess)
+                current["status"] = "error"
+                current["error"] = f"导入前测活失败：{error}"
+                current["message"] = "导入前测活失败，已停止自动导入"
+                blocked_import = dict(current.get("auto_import") or {})
+                blocked_import.update(
+                    {
+                        "enabled": True,
+                        "ok": False,
+                        "skipped": False,
+                        "queued": False,
+                        "waiting_for_probe": False,
+                        "error": current["error"],
+                    }
+                )
+                current["auto_import"] = blocked_import
+                current["updated_at"] = ctx._now()
+                ctx._append_session_event(
+                    current,
+                    "pre_import_probe_failed",
+                    current["message"],
+                    at=current["updated_at"],
+                )
+                ctx._sessions[sid] = current
+                ctx._mirror_reg_sess(sid, current)
     if recheck_delay is not None:
         ctx._schedule_probe_recheck(
             sid,

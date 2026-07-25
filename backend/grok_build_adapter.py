@@ -30,6 +30,7 @@ from grok_registration import management as _management
 from grok_registration import monitor as _monitor
 from grok_registration import pipeline as _pipeline
 from grok_registration import probe_control as _probe_control
+from grok_registration import protocol_worker as _protocol_worker
 from grok_registration import recovery as _recovery
 from grok_registration import solver as _solver
 from grok_registration import worker as _worker
@@ -190,12 +191,21 @@ def _continuous_import_dispatch_loop(key: str) -> None:
     )
 
 
+def _continuous_probe_dispatch_loop(key: str) -> None:
+    _pipeline.continuous_probe_dispatch_loop(
+        key,
+        max_concurrency=MAX_CONCURRENCY,
+        run_probe_wave=_run_probe_wave,
+    )
+
+
 def _pipeline_dispatch_loop(key: str) -> None:
     _pipeline.pipeline_dispatch_loop(
         key,
         run_probe_wave=_run_probe_wave,
         run_import_wave=_run_import_wave,
         continuous_import_dispatch=_continuous_import_dispatch_loop,
+        continuous_probe_dispatch=_continuous_probe_dispatch_loop,
     )
 
 
@@ -418,6 +428,7 @@ def _start_one_registration(
 
 def start_registration(
     *,
+    registration_mode: str | None = None,
     captcha_provider: str | None = None,
     local_solver_url: str | None = None,
     yescaptcha_key: str | None = None,
@@ -443,6 +454,7 @@ def start_registration(
 ) -> dict[str, Any]:
     return _flow.start_registration(
         _registration_context(),
+        registration_mode=registration_mode,
         captcha_provider=captcha_provider,
         local_solver_url=local_solver_url,
         yescaptcha_key=yescaptcha_key,
@@ -519,8 +531,23 @@ def _run_registration(
     receiver: Any,
     browser_runtime: Any | None = None,
 ) -> None:
+    context = _registration_context()
+    with context._lock:
+        session = context._sessions.get(sid) or {}
+    mode = str(
+        (session.get("_post_registration") or {}).get("registration_mode") or "browser"
+    ).lower()
+    if mode == "protocol":
+        _protocol_worker._run_registration(
+            context,
+            sid,
+            yescaptcha_key,
+            proxy,
+            receiver,
+        )
+        return
     _worker._run_registration(
-        _registration_context(),
+        context,
         sid,
         yescaptcha_key,
         proxy,

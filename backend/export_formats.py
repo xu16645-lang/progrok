@@ -270,7 +270,7 @@ def build_chatgpt_sub2api_payload(records: list[dict[str, Any]]) -> dict[str, An
                 "email": export["email"],
                 "plan_type": export["plan_type"],
             },
-            "concurrency": 1,
+            "concurrency": 3,
             "priority": 50,
             "rate_multiplier": 1.0,
             "auto_pause_on_expired": False,

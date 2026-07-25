@@ -44,6 +44,13 @@ def _run_registration(ctx, sid, proxy, receiver, browser_runtime=None):
     pipeline_cfg = dict(sess.get("_post_registration") or {})
     step_delay_ms = max(0, min(30000, int(pipeline_cfg.get("step_delay_ms") or 3000)))
     hotmail_account_id = str(sess.get("_hotmail_account_id") or "")
+    hotmail_alias_index = sess.get("_hotmail_alias_index")
+    try:
+        hotmail_alias_index = (
+            int(hotmail_alias_index) if hotmail_alias_index is not None else None
+        )
+    except (TypeError, ValueError):
+        hotmail_alias_index = None
     hotmail_marked_used = False
 
     def _pipeline_step_delay() -> None:
@@ -187,7 +194,9 @@ def _run_registration(ctx, sid, proxy, receiver, browser_runtime=None):
                 ):
                     from hotmail_local import mark_used
 
-                    if mark_used(hotmail_account_id):
+                    if mark_used(
+                        hotmail_account_id, alias_index=hotmail_alias_index
+                    ):
                         hotmail_marked_used = True
             except ctx._RegCancelled:
                 raise
@@ -227,7 +236,9 @@ def _run_registration(ctx, sid, proxy, receiver, browser_runtime=None):
         if hotmail_account_id and (not hotmail_marked_used):
             from hotmail_local import mark_used
 
-            hotmail_marked_used = mark_used(hotmail_account_id)
+            hotmail_marked_used = mark_used(
+                hotmail_account_id, alias_index=hotmail_alias_index
+            )
         session_data = result.get("session")
         if (
             not isinstance(session_data, dict)
@@ -435,7 +446,9 @@ def _run_registration(ctx, sid, proxy, receiver, browser_runtime=None):
                 if final_status in {"cancelled", "stopped", "stopping"}:
                     from hotmail_local import release_account
 
-                    release_account(hotmail_account_id)
+                    release_account(
+                        hotmail_account_id, alias_index=hotmail_alias_index
+                    )
                 else:
                     from hotmail_local import mark_failed
 
@@ -446,6 +459,7 @@ def _run_registration(ctx, sid, proxy, receiver, browser_runtime=None):
                             or final_session.get("message")
                             or "注册失败"
                         ),
+                        alias_index=hotmail_alias_index,
                     )
         with ctx._lock:
             if sid in ctx._sessions:

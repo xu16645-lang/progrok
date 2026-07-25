@@ -625,6 +625,27 @@ def probe_account(
                     "token_refreshed": token_refreshed,
                     "error": error or "xAI OAuth 凭证无效或已过期",
                 }
+            if _is_transient_permission_error(response.status_code, error):
+                if retry_count < len(PROBE_PERMISSION_RETRY_DELAYS):
+                    delay = PROBE_PERMISSION_RETRY_DELAYS[retry_count]
+                    retry_count += 1
+                    time.sleep(delay)
+                    continue
+                return {
+                    "ok": False,
+                    "available": None,
+                    "retryable": True,
+                    "classification": "permission_pending",
+                    "model": model,
+                    "status_code": response.status_code,
+                    "latency_ms": latency_ms,
+                    "retry_count": retry_count,
+                    "token_refreshed": token_refreshed,
+                    "error": (
+                        "xAI 聊天权限尚未生效，已完成权限传播重试："
+                        f"{error or 'Access to the chat endpoint is denied'}"
+                    )[:300],
+                }
             retryable = response.status_code in PROBE_TRANSIENT_STATUS_CODES
             return {
                 "ok": False,

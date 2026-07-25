@@ -8,56 +8,90 @@
   <meta http-equiv="Expires" content="0">
   <title>ProGrok 浏览器注册 - Grok / ChatGPT</title>
   <link rel="icon" href="data:,">
-  <link rel="stylesheet" href="/static/style.css?v=20260723-rotation-layout-1">
+<link rel="stylesheet" href="/static/style.css?v=20260725-registration-stats-2">
 </head>
 <body>
+  <svg class="lucide-sprite" aria-hidden="true">
+    <symbol id="lucide-folder" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></symbol>
+    <symbol id="lucide-download" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m7 10 5 5 5-5"/><path d="M12 15V3"/></symbol>
+    <symbol id="lucide-circle-check" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="lucide-settings" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.38a2 2 0 0 0-.73-2.73l-.15-.09a2 2 0 0 1-1-1.74v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2Z"/><circle cx="12" cy="12" r="3"/></symbol>
+    <symbol id="lucide-mail" viewBox="0 0 24 24"><rect width="20" height="16" x="2" y="4" rx="2"/><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7"/></symbol>
+    <symbol id="lucide-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10Z"/></symbol>
+    <symbol id="lucide-upload" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><path d="m17 8-5-5-5 5"/><path d="M12 3v12"/></symbol>
+    <symbol id="lucide-refresh-cw" viewBox="0 0 24 24"><path d="M21 12a9 9 0 0 0-15-6.7L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 15 6.7l3-2.7"/><path d="M21 21v-5h-5"/></symbol>
+    <symbol id="lucide-chart" viewBox="0 0 24 24"><path d="M3 3v18h18"/><path d="M7 16v-3"/><path d="M11 16V8"/><path d="M15 16v-5"/><path d="M19 16V5"/></symbol>
+    <symbol id="lucide-file-text" viewBox="0 0 24 24"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5Z"/><polyline points="14 2 14 8 20 8"/><path d="M8 13h8"/><path d="M8 17h8"/></symbol>
+    <symbol id="lucide-layers" viewBox="0 0 24 24"><path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z"/><path d="m22 12.5-9.17 4.17a2 2 0 0 1-1.66 0L2 12.5"/><path d="m22 17.5-9.17 4.17a2 2 0 0 1-1.66 0L2 17.5"/></symbol>
+    <symbol id="lucide-shield-check" viewBox="0 0 24 24"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1Z"/><path d="m9 12 2 2 4-4"/></symbol>
+    <symbol id="lucide-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></symbol>
+    <symbol id="lucide-trash" viewBox="0 0 24 24"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v5"/><path d="M14 11v5"/></symbol>
+    <symbol id="lucide-play" viewBox="0 0 24 24"><path d="m6 3 14 9-14 9Z"/></symbol>
+    <symbol id="lucide-panel-top" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/><path d="M15 21V9"/></symbol>
+  </svg>
   <main>
     <header>
-      <div>
+      <div class="title-card">
         <p class="eyebrow">STANDALONE REGISTRATION</p>
         <div class="title-line">
           <h1>ProGrok 浏览器注册</h1>
         </div>
-        <p class="subtitle">独立运行 · 本地保存 · 无需 PostgreSQL</p>
+        <div class="title-meta"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-shield-check"/></svg><span>独立运行</span><i>•</i><span>本地保存</span><i>•</i><span>稳定服务</span></div>
       </div>
-      <div class="header-actions">
-        <div class="path-control">
-          <button type="button" id="paths-button" class="path-button">注册文件路径</button>
+      <div class="header-side">
+        <div class="header-actions">
+          <div class="path-control">
+          <button type="button" id="paths-button" class="path-button"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-folder"/></svg>注册文件路径</button>
           <div id="paths-popover" class="paths-popover" hidden>
             <div class="paths-head"><strong>注册文件保存位置</strong><button type="button" id="paths-close" class="paths-close" aria-label="关闭">×</button></div>
             <div id="paths-list" class="paths-list"><div class="paths-loading">正在读取路径…</div></div>
           </div>
-        </div>
-        <div class="download-control">
-          <button type="button" id="download-button" class="path-button">账号下载</button>
+          </div>
+          <div class="download-control">
+          <button type="button" id="download-button" class="path-button"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-download"/></svg>账号下载</button>
           <div id="download-popover" class="paths-popover download-popover" hidden>
             <div class="paths-head"><strong>账号下载</strong><button type="button" id="download-close" class="paths-close" aria-label="关闭">×</button></div>
             <div class="download-bar">
-              <label>下载格式<select id="download-format"><option value="pure_sso">纯 SSO</option><option value="cookie">sso=...</option><option value="email_sso">邮箱 + SSO</option><option value="email_password_sso">邮箱:密码:SSO</option><option value="json">普通 JSON（邮箱 + 密码）</option><option value="cpa_json" selected>CPA JSON</option><option value="sub2api_json">Sub2API JSON</option><option value="chatgpt_auth_json">ChatGPT Agent Identity auth.json</option></select></label>
+              <label>下载格式<select id="download-format"><option value="pure_sso">纯 SSO</option><option value="cookie">sso=...</option><option value="email_sso">邮箱 + SSO</option><option value="email_password_sso">邮箱:密码:SSO</option><option value="json">普通 JSON（邮箱 + 密码）</option><option value="cpa_json" selected>CPA JSON</option><option value="sub2api_json">Sub2API JSON</option><option value="chatgpt_auth_json" disabled>ChatGPT Agent Identity auth.json</option></select></label>
               <label>下载范围<select id="download-batch"><option value="">全部成功账号</option></select></label>
               <button type="button" id="download-accounts" class="download-button">下载账号</button>
             </div>
           </div>
+          </div>
+          <div id="health" class="badge"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-circle-check"/></svg><span class="health-text">检查服务…</span></div>
         </div>
-        <div id="health" class="badge">检查服务…</div>
+        <div class="registration-stats" aria-label="注册数量统计">
+          <span><small>成功:</small><strong id="header-stat-success">0</strong></span>
+          <span><small>失败:</small><strong id="header-stat-failed">0</strong></span>
+          <span><small>成功率:</small><strong id="header-stat-success-rate">--</strong></span>
+          <span><small>存活:</small><strong id="header-stat-alive">0</strong></span>
+          <span><small>存活率:</small><strong id="header-stat-alive-rate">--</strong></span>
+          <span><small>总耗时:</small><strong id="header-stat-duration">--</strong></span>
+        </div>
       </div>
     </header>
 
     <nav class="module-nav" aria-label="配置模块">
-      <button type="button" class="module-nav-button active" data-config-tab="registration" aria-selected="true">注册配置</button>
-      <button type="button" class="module-nav-button" data-config-tab="mail" aria-selected="false">邮箱配置</button>
-      <button type="button" class="module-nav-button" data-config-tab="proxy" aria-selected="false">代理配置</button>
-      <button type="button" class="module-nav-button" data-config-tab="import" aria-selected="false">自动导入配置</button>
-      <button type="button" class="module-nav-button" data-config-tab="probe" aria-selected="false">测活配置</button>
-      <button type="button" class="module-nav-button" data-config-tab="rotation" aria-selected="false">账号轮询</button>
+      <button type="button" class="module-nav-button active" data-config-tab="registration" aria-selected="true"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-settings"/></svg>注册配置</button>
+      <button type="button" class="module-nav-button" data-config-tab="mail" aria-selected="false"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-mail"/></svg>邮箱配置</button>
+      <button type="button" class="module-nav-button" data-config-tab="proxy" aria-selected="false"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-globe"/></svg>代理配置</button>
+      <button type="button" class="module-nav-button" data-config-tab="import" aria-selected="false"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-upload"/></svg>自动导入配置</button>
+      <button type="button" class="module-nav-button" data-config-tab="rotation" aria-selected="false"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-refresh-cw"/></svg>账号轮询</button>
     </nav>
 
     <div class="workspace">
-    <section class="panel config-panel">
+    <section class="panel config-panel" data-active-module="registration">
       <div class="config-toolbar">
-        <div class="config-toolbar-title">注册配置</div>
+        <div class="config-toolbar-title"><svg class="lucide-icon" aria-hidden="true"><use id="config-toolbar-icon-use" href="#lucide-settings"/></svg><span id="config-toolbar-title-text">注册配置</span></div>
+        <div class="rotation-overview" id="rotation-overview" hidden>
+          <span>账号总数 <strong id="rotation-total">0</strong></span>
+          <span class="normal">正常 <strong id="rotation-normal">0</strong></span>
+          <span class="error">错误 <strong id="rotation-error">0</strong></span>
+          <small id="rotation-next-schedule">下次自动轮询：--</small>
+          <small id="rotation-last-schedule">上次自动轮询：--</small>
+        </div>
         <div class="actions">
-          <label class="toolbar-format">默认注册 JSON<select name="registration_json_format" form="config-form"><option value="cpa">CPA JSON</option><option value="sub2api">Sub2API JSON</option></select></label>
+          <label class="toolbar-format"><span class="toolbar-format-label">当前格式：</span><select name="registration_json_format" form="config-form"><option value="cpa">CPA JSON</option><option value="sub2api">Sub2API JSON</option></select></label>
           <button type="button" id="save" class="secondary">保存配置</button>
           <button type="button" id="pause-current" class="pause-current" disabled>暂停注册</button>
           <button type="submit" id="start" form="config-form">开始注册</button>
@@ -66,18 +100,21 @@
       <div class="config-scroll">
       <form id="config-form">
         <section class="config-module active" data-config-module="registration">
+        <div class="registration-section-title"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-layers"/></svg><strong>基础配置</strong></div>
         <div class="primary-setting">
-          <label>注册目标<select name="registration_target" id="registration-target-select"><option value="grok">Grok (xAI)</option><option value="chatgpt">ChatGPT (OpenAI)</option></select></label>
+          <label>注册目标<select name="registration_target" id="registration-target-select"><option value="grok">Grok (xAI)</option><option value="chatgpt" disabled>ChatGPT (OpenAI)</option></select></label>
+          <label data-target="grok">注册方式<select name="registration_mode" id="registration-mode-select"><option value="protocol" disabled>半协议注册</option><option value="browser" selected>浏览器注册</option></select></label>
           <label><span id="registration-count-label">注册数量</span><input name="count" type="number" min="1" max="10000"></label>
-          <label><span id="registration-concurrency-label">并发数</span><input name="concurrency" type="number" min="1" max="10"></label>
+          <label><span id="registration-concurrency-label">并发数（最多 8）</span><select name="concurrency"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option></select></label>
           <label data-target="grok">错峰毫秒<input name="stagger_ms" type="number" min="0" max="60000"></label>
           <label data-target="chatgpt" hidden>步骤操作延迟毫秒<input name="chatgpt_step_delay_ms" type="number" min="0" max="30000" value="3000"></label>
           <label class="tune-toggle" data-target="grok"><span>自动调优错峰</span><input name="auto_tune_enabled" type="checkbox"></label>
-          <label class="tune-toggle" data-target="grok" title="开启后注册时会弹出浏览器窗口，便于观察失败页面"><span>显示注册浏览器（调试）</span><input id="grok-browser-visible" type="checkbox"></label>
+          <label class="tune-toggle"><span>导入前测活</span><input name="pre_import_probe_enabled" type="checkbox" checked></label>
+          <label class="tune-toggle" data-target="grok" title="开启后浏览器注册及半协议登录授权阶段会弹出浏览器窗口，便于观察失败页面"><span>显示注册浏览器（调试）</span><input id="grok-browser-visible" type="checkbox"></label>
           <label class="tune-toggle" data-target="chatgpt" hidden title="开启后注册时会弹出浏览器窗口，便于观察失败页面"><span>显示注册浏览器（调试）</span><input id="chatgpt-browser-visible" type="checkbox"></label>
           <div id="performance-profile" class="performance-profile wide">正在评估本机性能…</div>
         </div>
-        <div class="section-title" data-target="grok"><span>A</span> 验证码与过盾</div>
+        <div class="registration-section-title captcha-title"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-shield-check"/></svg><strong>Captcha 配置</strong></div>
         <div class="grid" data-target="grok">
           <label>Captcha<select name="captcha_provider"><option value="local">本地 Turnstile Solver</option><option value="yescaptcha">YesCaptcha</option></select></label>
           <label><span class="field-label">本地 Solver <span id="solver-state" class="detect-state">检测中…</span></span><div class="input-action"><input name="local_solver_url" placeholder="正在自动检测" readonly><button type="button" id="detect-solver" class="inline-button">重新检测</button></div></label>
@@ -86,9 +123,8 @@
         </section>
 
         <section class="config-module" data-config-module="mail" hidden>
-        <div class="section-title"><span>A</span> 邮箱服务</div>
         <div class="grid">
-            <label>邮箱类型<select name="mail_provider"><option value="yyds">YYDS Mail</option><option value="custom">自定义（Cloudflare 邮箱）</option><option value="stalwart">Stalwart 域名邮箱</option><option value="hotmail_local">微软邮箱账户池（本地助手）</option></select></label>
+            <label id="mail-provider-field">邮箱类型<select name="mail_provider"><option value="custom">自定义</option><option value="hotmail_local">微软邮箱账户池（本地助手）</option></select></label>
             <label data-mail-standard>API 地址<input name="mail_base_url" placeholder="YYDS 或自建邮箱 API 地址"></label>
             <label data-mail-standard>API Key / 管理员密钥<input name="mail_api_key" type="password" autocomplete="off"></label>
           <label data-mail-standard>邮箱域名<input name="mail_domain" placeholder="可留空自动选择"></label>
@@ -99,14 +135,28 @@
               <button type="button" id="test-hotmail-helper" class="inline-button">检测助手</button>
             </div>
             <label>批量导入微软邮箱账号<textarea id="hotmail-import-text" rows="5" placeholder="email----password----client-id----refresh-token&#10;每行一个账号"></textarea></label>
-            <div class="hotmail-pool-head"><span id="hotmail-pool-summary">账户池：正在读取…</span><div class="hotmail-pool-actions"><button type="button" id="delete-used-hotmail-accounts" class="inline-button danger-button">删除已用</button><button type="button" id="delete-unhealthy-hotmail-accounts" class="inline-button danger-button">删除测活失败</button><button type="button" id="probe-hotmail-accounts" class="inline-button">全部重新测活</button><button type="button" id="import-hotmail-accounts" class="inline-button">导入并自动测活</button></div></div>
-            <div id="hotmail-account-list" class="hotmail-account-list"><div class="empty">尚未导入微软邮箱账号</div></div>
+            <div class="hotmail-pool-head"><span id="hotmail-pool-summary">账户池：正在读取…</span></div>
+            <div class="hotmail-list-toolbar">
+              <div class="hotmail-list-filters">
+                <label><span class="visually-hidden">状态筛选</span><select id="hotmail-status-filter" aria-label="状态筛选"><option value="">全部状态</option><option value="healthy">测活通过</option><option value="unhealthy">测活失败</option><option value="unchecked">未测活</option><option value="failed">注册失败</option><option value="used">已使用</option><option value="reserved">使用中</option></select></label>
+                <label class="hotmail-search"><span class="visually-hidden">搜索邮箱</span><span class="hotmail-search-field"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-search"/></svg><input id="hotmail-keyword" type="search" aria-label="搜索邮箱" placeholder="模糊搜索邮箱名称"></span></label>
+              </div>
+              <div class="hotmail-pool-actions"><button type="button" id="delete-selected-hotmail-accounts" class="inline-button danger-button" disabled><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-trash"/></svg>删除所选</button><button type="button" id="delete-used-hotmail-accounts" class="inline-button danger-button"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-trash"/></svg>删除已用</button><button type="button" id="probe-hotmail-accounts" class="inline-button"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-refresh-cw"/></svg>全部重新测活</button><button type="button" id="import-hotmail-accounts" class="inline-button"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-upload"/></svg>导入并自动测活</button></div>
+            </div>
+            <div class="hotmail-account-table">
+              <div class="hotmail-account-table-head"><span><input id="hotmail-select-all" type="checkbox" aria-label="全选当前页" title="全选当前页"></span><span>邮箱账号</span><span>状态</span><span>验证码</span><span>Client ID</span><span>操作</span></div>
+              <div id="hotmail-account-list" class="hotmail-account-list"><div class="empty">尚未导入微软邮箱账号</div></div>
+            </div>
+            <div id="hotmail-pagination" class="hotmail-pagination">
+              <span id="hotmail-page-summary">共 0 条</span>
+              <div id="hotmail-page-buttons" class="hotmail-page-buttons"></div>
+              <label>每页<select id="hotmail-page-size"><option value="10">10 条/页</option><option value="20">20 条/页</option><option value="50">50 条/页</option></select></label>
+            </div>
           </div>
         </div>
         </section>
 
         <section class="config-module" data-config-module="proxy" hidden>
-        <div class="section-title"><span>A</span> 代理与轮换</div>
         <div class="grid">
           <label class="wide"><span class="field-label proxy-field-label">代理池<button type="button" id="detect-proxy" class="inline-button">检测本机代理</button></span><textarea name="proxy" rows="4" placeholder="每行一个代理；留空时自动检测本机代理"></textarea></label>
           <label>代理用户名<input name="proxy_username"></label>
@@ -116,7 +166,6 @@
         </section>
 
         <section class="config-module" data-config-module="import" hidden>
-        <div class="section-title"><span>A</span> 导入目标</div>
         <div class="grid">
           <label>导入并发数<input name="import_concurrency" type="number" min="1" max="10"></label>
           <label>导入错峰毫秒<input name="import_stagger_ms" type="number" min="0" max="60000"></label>
@@ -150,45 +199,41 @@
           <label data-import-target="cpa" hidden>CPA 地址<input name="cpa_base_url" placeholder="https://cpa.example.com"></label>
           <label data-import-target="cpa" hidden>CPA 管理密钥<input name="cpa_management_key" type="password" autocomplete="off"></label>
         </div>
-        </section>
-
-        <section class="config-module" data-config-module="probe" hidden>
-        <div class="section-title"><span>A</span> 账号测活</div>
-        <div class="grid">
-          <label data-target="grok">Grok 测活模型<input name="probe_model" placeholder="grok-4.5"></label>
-          <label data-target="chatgpt" hidden>ChatGPT 测活模型<input name="chatgpt_probe_model" placeholder="gpt-5.5"></label>
-          <label>测活并发数<input name="probe_concurrency" type="number" min="1" max="10"></label>
-          <label>测活错峰毫秒<input name="probe_stagger_ms" type="number" min="0" max="60000"></label>
-          <div class="probe-batch-control wide">
-            <label>注册批次<select id="probe-batch"><option value="">暂无可测活批次</option></select></label>
+        <div id="manual-import-panel" class="manual-import-panel" hidden>
+          <div class="manual-import-head">
+            <div><strong>待手动导入</strong><small id="manual-import-summary">0 个已转换账号</small></div>
+          </div>
+          <div class="manual-import-table-wrap">
+            <table class="manual-import-table">
+              <thead><tr><th>账号</th><th>JSON 格式</th><th>测活状态</th><th>转换时间</th><th>操作</th></tr></thead>
+              <tbody id="manual-import-list"><tr><td colspan="5" class="manual-import-empty">暂无待导入账号</td></tr></tbody>
+            </table>
           </div>
         </div>
         </section>
 
         <section class="config-module" data-config-module="rotation" hidden>
-          <div class="rotation-overview" id="rotation-overview">
-            <span>账号总数 <strong id="rotation-total">0</strong></span>
-            <span class="normal">正常 <strong id="rotation-normal">0</strong></span>
-            <span class="error">错误 <strong id="rotation-error">0</strong></span>
-            <small id="rotation-schedule">每 30 分钟自动全量探活</small>
-          </div>
           <div class="rotation-controls">
             <label>账号状态<select id="rotation-status"><option value="">全部状态</option><option value="normal">正常</option><option value="error">错误</option></select></label>
-            <label class="rotation-search">搜索<input id="rotation-keyword" type="search" placeholder="账号、类型或错误信息"></label>
+            <label class="rotation-search">搜索<span class="rotation-search-field"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-search"/></svg><input id="rotation-keyword" type="search" placeholder="账号、类型或错误信息"></span></label>
             <label>每页<select id="rotation-page-size"><option value="20">20 条</option><option value="50">50 条</option><option value="80">80 条</option></select></label>
             <button type="button" id="rotation-search-button" class="inline-button">搜索</button>
           </div>
           <div class="rotation-bulk-actions">
-            <label class="rotation-select-all"><input id="rotation-select-all" type="checkbox"> 全选当前页</label>
-            <span id="rotation-selection-count">已选 0 项</span>
-            <button type="button" id="rotation-probe-selected" class="inline-button">探活所选</button>
-            <button type="button" id="rotation-delete-selected" class="inline-button danger-button">删除所选</button>
+            <div class="rotation-bulk-meta">
+              <span id="rotation-selection-count">已选 0 项</span>
+            </div>
+            <div class="rotation-bulk-buttons">
+              <button type="button" id="rotation-probe-selected" class="inline-button"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-play"/></svg>激活所选</button>
+              <button type="button" id="rotation-delete-selected" class="inline-button danger-button"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-trash"/></svg>删除所选</button>
+              <button type="button" id="rotation-probe-all" class="inline-button"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-refresh-cw"/></svg>全部激活</button>
+            </div>
           </div>
           <div class="rotation-table-wrap">
             <table class="rotation-table">
               <thead>
                 <tr>
-                  <th aria-label="选择"></th>
+                  <th><input id="rotation-select-all" type="checkbox" aria-label="全选当前页" title="全选当前页"></th>
                   <th>账号信息</th>
                   <th>账号状态</th>
                   <th>类型</th>
@@ -217,10 +262,10 @@
     </section>
 
     <div class="side-column">
-    <section class="panel results log-panel">
+    <section class="panel results monitor-panel">
       <div class="results-head">
-        <div><div class="section-title"><span>05</span> 注册监控</div><p id="summary">暂无任务</p></div>
-        <div class="results-actions"><button id="reset-round" class="ghost reset-round">清除本轮</button><button id="refresh" class="ghost">立即刷新</button></div>
+        <div><div class="section-title"><span class="monitor-title-icon-box"><svg class="lucide-icon monitor-title-icon" aria-hidden="true"><use href="#lucide-panel-top"/></svg></span>注册监控 <em>05</em></div><p id="summary">暂无任务</p></div>
+        <div class="results-actions"><button id="reset-round" class="ghost reset-round"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-trash"/></svg>清除本轮</button><button id="refresh" class="ghost"><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-refresh-cw"/></svg>立即刷新</button></div>
       </div>
       <div id="workflow-status-banner" class="workflow-status-banner idle"><span class="workflow-status-dot"></span><strong id="workflow-status-text">等待开始注册</strong></div>
       <div class="monitor-flow-head">
@@ -228,7 +273,9 @@
         <strong id="workflow-progress">0 / 0</strong>
       </div>
       <div id="workflow-steps" class="monitor-workflow"><div class="empty">启动任务后显示固定注册流程</div></div>
-      <div class="monitor-log-head"><span>日志</span><div><small id="activity-count">0 条</small><button type="button" id="clear-logs" class="log-clear">清空</button></div></div>
+    </section>
+    <section class="panel results monitor-log-panel log-panel">
+      <div class="monitor-log-head"><span><svg class="lucide-icon" aria-hidden="true"><use href="#lucide-file-text"/></svg>日志</span><div><small id="activity-count">0 条</small><button type="button" id="clear-logs" class="log-clear">清空</button></div></div>
       <div id="tasks" class="monitor-log"><div class="log-empty">注册日志将在这里自动滚动显示</div></div>
     </section>
     </div>
@@ -251,7 +298,14 @@
       </div>
     </div>
   </div>
+  <div id="global-confirm" class="confirm-modal" role="dialog" aria-modal="true" aria-labelledby="global-confirm-heading" hidden>
+    <div class="confirm-dialog">
+      <div class="confirm-head"><span class="confirm-info" aria-hidden="true">i</span><h2 id="global-confirm-heading">提示</h2></div>
+      <div class="confirm-body"><strong id="global-confirm-title"></strong><p id="global-confirm-detail"></p></div>
+      <div class="confirm-actions"><button type="button" id="global-confirm-ok">确定</button><button type="button" id="global-confirm-cancel">取消</button></div>
+    </div>
+  </div>
   <div id="toast" role="status" aria-live="polite"></div>
-  <script src="/static/app.js?v=20260724-xai-browser-rollback-1"></script>
+<script src="/static/app.js?v=20260725-disable-chatgpt-download-9"></script>
 </body>
 </html>

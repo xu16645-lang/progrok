@@ -90,9 +90,13 @@ def _prepare_registration_session(
         "batch_id": batch_id,
         "batch_index": batch_index,
         "batch_total": batch_total,
+        "pre_import_probe_enabled": bool(
+            (post_registration or {}).get("pre_import_probe_enabled", True)
+        ),
         # Keep receiver process-local only (not mirrored to Redis).
         "_receiver": receiver,
         "_hotmail_account_id": getattr(receiver, "account_id", None),
+        "_hotmail_alias_index": getattr(receiver, "alias_index", None),
         "_post_registration": dict(post_registration or {}),
         "_headless": bool(headless),
     }
@@ -193,6 +197,7 @@ def _start_one_registration(
 def start_registration(
     ctx: RegistrationContext,
     *,
+    registration_mode: str | None = None,
     captcha_provider: str | None = None,
     local_solver_url: str | None = None,
     yescaptcha_key: str | None = None,
@@ -246,10 +251,82 @@ def start_registration(
         except (TypeError, ValueError):
             pass
 
-    # Browser registration owns the real page challenge. Keep legacy arguments in
-    # the public API so persisted configs and older clients remain loadable.
-    provider = "browser"
-    key = ""
+    mode = str(registration_mode or "browser").strip().lower()
+    if mode not in {"protocol", "browser"}:
+        mode = "browser"
+    post_registration = dict(post_registration or {})
+    post_registration["registration_mode"] = mode
+
+    if mode == "browser":
+        provider = "browser"
+        key = ""
+    else:
+        provider = (
+            (
+                captcha_provider
+                or ctx.CAPTCHA_PROVIDER
+                or ctx.os.environ.get("GROK2API_CAPTCHA_PROVIDER")
+                or ctx.os.environ.get("CAPTCHA_PROVIDER")
+                or "local"
+            )
+            .strip()
+            .lower()
+        )
+        if provider not in {"local", "yescaptcha"}:
+            provider = "local"
+        try:
+            ctx.values["CAPTCHA_PROVIDER"] = provider
+        except Exception:
+            pass
+
+        if provider == "local":
+            solver_url = ctx._local_solver_base_url(local_solver_url)
+            try:
+                ctx.values["LOCAL_SOLVER_URL"] = solver_url
+            except Exception:
+                pass
+            ctx.os.environ["GROK2API_LOCAL_SOLVER_URL"] = solver_url
+            ctx.os.environ["LOCAL_SOLVER_URL"] = solver_url
+            ctx.os.environ["GROK2API_YESCAPTCHA_ENDPOINT"] = solver_url
+            ctx.os.environ["YESCAPTCHA_ENDPOINT"] = solver_url
+            key = "local"
+            solver_wait = ctx.wait_for_local_solver(solver_url)
+            if not solver_wait.get("ready"):
+                return {
+                    "ok": False,
+                    "error": solver_wait.get("error") or f"本地过盾未就绪: {solver_url}",
+                    "local_solver": solver_wait,
+                }
+        else:
+            try:
+                ctx.values["LOCAL_SOLVER_URL"] = ""
+            except Exception:
+                pass
+            for env_key in (
+                "GROK2API_LOCAL_SOLVER_URL",
+                "LOCAL_SOLVER_URL",
+                "GROK2API_YESCAPTCHA_ENDPOINT",
+                "YESCAPTCHA_ENDPOINT",
+                "YESCAPTCHA_API_BASE",
+            ):
+                ctx.os.environ.pop(env_key, None)
+            key = (
+                yescaptcha_key
+                or ctx.YESCAPTCHA_KEY
+                or ctx.os.environ.get("GROK2API_YESCAPTCHA_KEY")
+                or ctx.os.environ.get("YESCAPTCHA_API_KEY")
+                or ""
+            ).strip()
+            if key == "local":
+                key = ""
+            if not key:
+                return {"ok": False, "error": "YesCaptcha 模式需要有效的 API Key"}
+
+        if key and key != ctx.YESCAPTCHA_KEY:
+            try:
+                ctx.values["YESCAPTCHA_KEY"] = key
+            except Exception:
+                pass
 
     try:
         n = int(count if count is not None else 1)

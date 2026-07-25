@@ -26,7 +26,7 @@ YYDS_DEFAULT_DOMAIN = ""
 GPTMAIL_DEFAULT_BASE_URL = "https://mail.chatgpt.org.uk"
 GPTMAIL_PUBLIC_TEST_KEY = "gpt-test"
 CFMAIL_DEFAULT_BASE_URL = "https://temp-email-api.awsl.uk"
-STALWART_DEFAULT_BASE_URL = "http://mail.gptfree.jo3.org"
+STALWART_DEFAULT_BASE_URL = ""
 
 
 def _headers(api_key: str | None = None) -> dict[str, str]:
@@ -45,6 +45,8 @@ def normalize_mail_provider(provider: str | None, *, base_url: str | None = None
     if p in {"yyds", "yydsmail", "yyds_mail", "vip215", "215", "maliapi"}:
         return "yyds"
     if p in {"custom", "selfhosted", "self-hosted", "自定义"}:
+        return "cfmail"
+    if p in {"cloudflare_grokfree", "grokfree"}:
         return "cfmail"
     if p in {
         "gptmail",

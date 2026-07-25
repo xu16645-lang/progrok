@@ -22,6 +22,7 @@ from account_pipeline import (
     probe_account,
     probe_grok_account_in_sub2api,
 )
+import account_pipeline_parts.sub2api as sub2api_protocol
 from export_formats import cpa_chatgpt_agent_identity_filename
 import accounts
 from accounts import import_auth_payload
@@ -176,6 +177,77 @@ class ProbeFallbackTests(unittest.TestCase):
             calls,
         )
 
+    def test_chat_permission_403_retries_until_upstream_is_ready(self):
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request.url.path)
+            if len(calls) < 3:
+                return httpx.Response(
+                    403,
+                    json={"error": "Access to the chat endpoint is denied."},
+                    request=request,
+                )
+            return httpx.Response(
+                200,
+                text=(
+                    'data: {"type":"response.output_text.delta","delta":"OK"}\n\n'
+                    'data: {"type":"response.completed","response":{"status":"completed"}}\n\n'
+                ),
+                request=request,
+            )
+
+        with (
+            patch(
+                "account_pipeline_parts.grok_probe.PROBE_PERMISSION_RETRY_DELAYS",
+                (0.0, 0.0, 0.0),
+            ),
+            httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        ):
+            result = probe_account(
+                {"access_token": "test", "base_url": "https://example.test/v1"},
+                client=client,
+            )
+
+        self.assertTrue(result["available"])
+        self.assertEqual(result["retry_count"], 2)
+        self.assertEqual(calls, ["/v1/responses"] * 3)
+
+    def test_persistent_chat_permission_403_is_retryable_not_invalid(self):
+        calls = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            calls.append(request.url.path)
+            return httpx.Response(
+                403,
+                json={
+                    "error": (
+                        "Access to the chat endpoint is denied. Please ensure you are "
+                        "using the correct credentials. If you believe this is a mistake, "
+                        "please log into console.x.ai and update the permissions"
+                    )
+                },
+                request=request,
+            )
+
+        with (
+            patch(
+                "account_pipeline_parts.grok_probe.PROBE_PERMISSION_RETRY_DELAYS",
+                (0.0, 0.0, 0.0),
+            ),
+            httpx.Client(transport=httpx.MockTransport(handler)) as client,
+        ):
+            result = probe_account(
+                {"access_token": "test", "base_url": "https://example.test/v1"},
+                client=client,
+            )
+
+        self.assertIsNone(result["available"])
+        self.assertTrue(result["retryable"])
+        self.assertEqual(result["classification"], "permission_pending")
+        self.assertEqual(result["retry_count"], 3)
+        self.assertEqual(calls, ["/v1/responses"] * 4)
+
 
 class XaiCredentialPersistenceTests(unittest.TestCase):
     def setUp(self):
@@ -256,6 +328,29 @@ class XaiCredentialPersistenceTests(unittest.TestCase):
         self.assertEqual("new-refresh", saved_auth[auth_key]["refresh_token"])
         self.assertEqual("2026-07-24T12:00:00Z", saved_auth[auth_key]["expires_at"])
 
+    def test_import_saves_access_and_refresh_tokens_in_both_site_formats(self):
+        payload = {
+            "key": "access-token",
+            "access_token": "access-token",
+            "refresh_token": "refresh-token",
+            "auth_mode": "oidc",
+            "email": "user@example.com",
+            "oidc_issuer": "https://auth.x.ai",
+            "oidc_client_id": "client-id",
+        }
+
+        cpa_result = import_auth_payload(payload, output_format="cpa")
+        sub2_result = import_auth_payload(payload, output_format="sub2api")
+
+        self.assertTrue(cpa_result["ok"])
+        self.assertTrue(sub2_result["ok"])
+        cpa = json.loads(Path(cpa_result["imported"][0]["path"]).read_text(encoding="utf-8"))
+        sub2 = json.loads(Path(sub2_result["imported"][0]["path"]).read_text(encoding="utf-8"))
+        self.assertEqual("access-token", cpa["access_token"])
+        self.assertEqual("refresh-token", cpa["refresh_token"])
+        self.assertEqual("access-token", sub2["accounts"][0]["credentials"]["access_token"])
+        self.assertEqual("refresh-token", sub2["accounts"][0]["credentials"]["refresh_token"])
+
     def test_agent_identity_task_recovery_updates_merged_and_account_files(self):
         runtime_id = "runtime-1"
         auth_key = f"chatgpt-agent::{runtime_id}"
@@ -305,6 +400,7 @@ class XaiCredentialPersistenceTests(unittest.TestCase):
 
 class Sub2APIImportTests(unittest.TestCase):
     def setUp(self):
+        sub2api_protocol._clear_sub2api_auth_cache()
         self.agent_record = {
             "auth_mode": "agent_identity",
             "email": "user@example.com",
@@ -321,6 +417,9 @@ class Sub2APIImportTests(unittest.TestCase):
                 "chatgpt_account_is_fedramp": False,
             },
         }
+
+    def tearDown(self):
+        sub2api_protocol._clear_sub2api_auth_cache()
 
     def test_grok_oauth_callback_creates_account_directly_in_sub2api(self):
         requests = []
@@ -376,6 +475,7 @@ class Sub2APIImportTests(unittest.TestCase):
         )
         create_body = json.loads(requests[1].content)
         self.assertEqual(create_body["session_id"], "sub2-session-1")
+        self.assertEqual(create_body["concurrency"], 3)
         self.assertEqual(create_body["group_ids"], [20])
         self.assertIn("callback?code=code-1", create_body["code"])
         self.assertNotIn("access_token", create_body)
@@ -419,6 +519,7 @@ class Sub2APIImportTests(unittest.TestCase):
         self.assertEqual(requests[0].url.path, "/api/v1/admin/grok/sso-to-oauth")
         body = json.loads(requests[0].content)
         self.assertEqual(body["sso_token"], "signed-sso")
+        self.assertEqual(body["concurrency"], 3)
         self.assertEqual(body["group_ids"], [20])
 
     def test_callback_imported_grok_probe_uses_sub2api_account_test(self):
@@ -450,6 +551,78 @@ class Sub2APIImportTests(unittest.TestCase):
         self.assertTrue(result["available"])
         self.assertEqual(requests[0].url.path, "/api/v1/admin/accounts/88/test")
         self.assertEqual(json.loads(requests[0].content)["model_id"], "grok-4.5")
+
+    def test_callback_probe_reuses_password_login_across_accounts(self):
+        requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            if request.url.path == "/api/v1/auth/login":
+                return httpx.Response(
+                    200,
+                    json={"data": {"access_token": "admin-access"}},
+                    request=request,
+                )
+            return httpx.Response(
+                200,
+                text='data: {"type":"test_complete","success":true}\n\n',
+                request=request,
+            )
+
+        sub2api_protocol._clear_sub2api_auth_cache()
+        try:
+            with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+                for account_id in (88, 89):
+                    result = probe_grok_account_in_sub2api(
+                        account_id,
+                        model="grok-4.5",
+                        base_url="https://sub2.example.test",
+                        auth_mode="password",
+                        admin_email="admin@example.test",
+                        admin_password="secret",
+                        client=client,
+                    )
+                    self.assertTrue(result["ok"])
+        finally:
+            sub2api_protocol._clear_sub2api_auth_cache()
+
+        self.assertEqual(
+            sum(request.url.path == "/api/v1/auth/login" for request in requests),
+            1,
+        )
+        self.assertEqual(
+            sum(request.url.path.endswith("/test") for request in requests),
+            2,
+        )
+
+    def test_callback_probe_login_429_is_retryable_not_account_failure(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(
+                429,
+                json={"message": "Too many requests, please try again later"},
+                request=request,
+            )
+
+        sub2api_protocol._clear_sub2api_auth_cache()
+        try:
+            with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+                result = probe_grok_account_in_sub2api(
+                    88,
+                    model="grok-4.5",
+                    base_url="https://sub2.example.test",
+                    auth_mode="password",
+                    admin_email="admin@example.test",
+                    admin_password="secret",
+                    client=client,
+                )
+        finally:
+            sub2api_protocol._clear_sub2api_auth_cache()
+
+        self.assertFalse(result["ok"])
+        self.assertIsNone(result["available"])
+        self.assertTrue(result["retryable"])
+        self.assertEqual(result["classification"], "rate_limited")
+        self.assertEqual(result["status_code"], 429)
 
     def test_agent_identity_uses_codex_session_group_and_fixed_models(self):
         requests = []
@@ -489,6 +662,7 @@ class Sub2APIImportTests(unittest.TestCase):
         self.assertEqual(auth_json["agent_identity"]["task_id"], "task-1")
         self.assertNotIn("access_token", body["content"])
         self.assertNotIn("refresh_token", body["content"])
+        self.assertEqual(body["concurrency"], 3)
         self.assertEqual(body["group_ids"], [23])
         self.assertTrue(body["skip_default_group_bind"])
         self.assertEqual(
@@ -568,7 +742,69 @@ class Sub2APIImportTests(unittest.TestCase):
 
         self.assertFalse(result["ok"])
         self.assertIn("access_token", result["error"])
+        self.assertIn("refresh_token", result["error"])
         self.assertEqual(requests, [])
+
+    def test_cpa_rejects_xai_payload_without_refresh_token_before_upload(self):
+        requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            result = import_to_cpa(
+                {"type": "xai", "access_token": "access"},
+                base_url="https://cpa.example.test",
+                api_key="management-key",
+                client=client,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertIn("refresh_token", result["error"])
+        self.assertEqual(requests, [])
+
+    def test_cpa_rejects_xai_payload_without_access_token_before_upload(self):
+        requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            result = import_to_cpa(
+                {"type": "xai", "refresh_token": "refresh"},
+                base_url="https://cpa.example.test",
+                api_key="management-key",
+                client=client,
+            )
+
+        self.assertFalse(result["ok"])
+        self.assertIn("access_token", result["error"])
+        self.assertEqual(requests, [])
+
+    def test_cpa_accepts_xai_payload_with_access_and_refresh_tokens(self):
+        requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            return httpx.Response(200, json={"status": "ok"}, request=request)
+
+        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            result = import_to_cpa(
+                {
+                    "type": "xai",
+                    "email": "xai@example.com",
+                    "access_token": "access",
+                    "refresh_token": "refresh",
+                },
+                base_url="https://cpa.example.test",
+                api_key="management-key",
+                client=client,
+            )
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(len(requests), 1)
 
     def test_cpa_does_not_downgrade_malformed_agent_identity_to_xai(self):
         requests = []
@@ -706,6 +942,7 @@ class Sub2APIImportTests(unittest.TestCase):
         ]
         for index, shape in enumerate(shapes, start=1):
             with self.subTest(shape=index):
+                sub2api_protocol._clear_sub2api_auth_cache()
                 calls = []
 
                 def handler(request: httpx.Request) -> httpx.Response:

@@ -479,13 +479,12 @@ def sso_to_token_with_browser(
                     attempt_failure,
                     stage="approve",
                     detail=exc,
-                    retryable=_is_retryable_network_error(exc),
+                    # The browser already performs bounded state-aware retries.
+                    # Starting a new Device Flow here opens another authorization
+                    # page and makes a successful manual click look ineffective.
+                    retryable=False,
                 )
                 _copy_failure(failure, attempt_failure)
-                if _retry_device_flow(
-                    log, attempt, retries, attempt_failure, should_cancel
-                ):
-                    continue
                 return None
             token = poll_token(
                 device_code,
@@ -493,7 +492,10 @@ def sso_to_token_with_browser(
                 dc.get("expires_in", 1800),
                 timeout=float(os.getenv("GROK2API_SSO_POLL_TIMEOUT", "45") or 45),
                 session=session,
-                immediate=True,
+                # Match Sub2API's working xAI Device Flow: wait the server's
+                # advertised interval before the first token exchange so the
+                # Allow transaction has time to commit.
+                immediate=False,
                 failure=attempt_failure,
                 should_cancel=should_cancel,
             )

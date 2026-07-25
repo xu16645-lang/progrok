@@ -32,11 +32,27 @@ def import_to_cpa(
             cpa = build_cpa_chatgpt_agent_identity_record(record)
             name = cpa_chatgpt_agent_identity_filename(cpa)
         else:
-            if not str(record.get("access_token") or record.get("key") or "").strip():
+            access_token = str(
+                record.get("access_token") or record.get("key") or ""
+            ).strip()
+            refresh_token = str(record.get("refresh_token") or "").strip()
+            missing_fields = [
+                field
+                for field, value in (
+                    ("access_token", access_token),
+                    ("refresh_token", refresh_token),
+                )
+                if not value
+            ]
+            if missing_fields:
                 return {
                     "ok": False,
                     "target": "cpa",
-                    "error": "xAI OAuth 账号缺少 access_token，已阻止上传为 xai-unknown.json",
+                    "error": (
+                        "xAI OAuth 账号缺少 "
+                        + "、".join(missing_fields)
+                        + "，已阻止上传 CPA"
+                    ),
                 }
             cpa = build_cpa_record(record)
             name = cpa_filename(cpa)

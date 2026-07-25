@@ -2,6 +2,8 @@
 from __future__ import annotations
 
 import json
+import threading
+import time
 from typing import Any, Callable
 
 import httpx
@@ -11,6 +13,24 @@ from .common import (
     CHATGPT_SUB2API_MODELS,
     error_text as _error_text,
 )
+
+
+_AUTH_CACHE_TTL_SECONDS = 5 * 60
+_AUTH_CACHE_LOCK = threading.RLock()
+_AUTH_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, str]]] = {}
+
+
+def _password_auth_cache_key(base: str, email: str, password: str) -> tuple[str, str, str]:
+    # Keep the cache process-local and avoid retaining the plaintext password as a key.
+    import hashlib
+
+    digest = hashlib.sha256(password.encode("utf-8")).hexdigest()
+    return base, email.lower(), digest
+
+
+def _clear_sub2api_auth_cache() -> None:
+    with _AUTH_CACHE_LOCK:
+        _AUTH_CACHE.clear()
 
 
 def _sub2api_auth_headers(
@@ -37,45 +57,70 @@ def _sub2api_auth_headers(
         return None, {"ok": False, "target": "sub2api", "error": "不支持的 Sub2API 认证方式"}
     if mode == "api_key":
         return {"x-api-key": key}, None
-    login_response = http.post(
-        f"{base}/api/v1/auth/login",
-        headers={"Content-Type": "application/json"},
-        json={"email": email, "password": password},
-    )
-    if login_response.status_code >= 300:
-        return None, {
-            "ok": False,
-            "target": "sub2api",
-            "status_code": login_response.status_code,
-            "error": f"Sub2API 登录失败：{_error_text(login_response)}",
-        }
-    try:
-        login_payload = login_response.json()
-    except Exception:
-        login_payload = {}
-    login_data = (
-        login_payload.get("data")
-        if isinstance(login_payload, dict) and isinstance(login_payload.get("data"), dict)
-        else login_payload
-    )
-    if isinstance(login_data, dict) and login_data.get("requires_2fa"):
-        return None, {
-            "ok": False,
-            "target": "sub2api",
-            "error": "Sub2API 管理员账号启用了二次验证，请改用管理员 API Key",
-        }
-    access_token = (
-        str(login_data.get("access_token") or "").strip()
-        if isinstance(login_data, dict)
-        else ""
-    )
-    if not access_token:
-        return None, {
-            "ok": False,
-            "target": "sub2api",
-            "error": "Sub2API 登录响应中没有 access_token",
-        }
-    return {"Authorization": f"Bearer {access_token}"}, None
+    cache_key = _password_auth_cache_key(base, email, password)
+    with _AUTH_CACHE_LOCK:
+        cached = _AUTH_CACHE.get(cache_key)
+        if cached and cached[0] > time.monotonic():
+            return dict(cached[1]), None
+        _AUTH_CACHE.pop(cache_key, None)
+
+        # Serialize password login so a concurrent probe batch performs one login.
+        login_response = http.post(
+            f"{base}/api/v1/auth/login",
+            headers={"Content-Type": "application/json"},
+            json={"email": email, "password": password},
+        )
+        if login_response.status_code >= 300:
+            status_code = login_response.status_code
+            retryable = status_code == 429
+            return None, {
+                "ok": False,
+                "available": None if retryable else False,
+                "retryable": retryable,
+                "classification": "rate_limited" if retryable else "authentication_failed",
+                "target": "sub2api",
+                "status_code": status_code,
+                "error": f"Sub2API 登录失败：{_error_text(login_response)}",
+            }
+        try:
+            login_payload = login_response.json()
+        except Exception:
+            login_payload = {}
+        login_data = (
+            login_payload.get("data")
+            if isinstance(login_payload, dict)
+            and isinstance(login_payload.get("data"), dict)
+            else login_payload
+        )
+        if isinstance(login_data, dict) and login_data.get("requires_2fa"):
+            return None, {
+                "ok": False,
+                "available": False,
+                "retryable": False,
+                "classification": "authentication_failed",
+                "target": "sub2api",
+                "error": "Sub2API 管理员账号启用了二次验证，请改用管理员 API Key",
+            }
+        access_token = (
+            str(login_data.get("access_token") or "").strip()
+            if isinstance(login_data, dict)
+            else ""
+        )
+        if not access_token:
+            return None, {
+                "ok": False,
+                "available": False,
+                "retryable": False,
+                "classification": "authentication_failed",
+                "target": "sub2api",
+                "error": "Sub2API 登录响应中没有 access_token",
+            }
+        headers = {"Authorization": f"Bearer {access_token}"}
+        _AUTH_CACHE[cache_key] = (
+            time.monotonic() + _AUTH_CACHE_TTL_SECONDS,
+            headers,
+        )
+        return dict(headers), None
 
 
 def list_sub2api_groups(
@@ -257,7 +302,7 @@ def create_grok_oauth_in_sub2api(
                 "code": callback_input,
                 "state": state,
                 "name": str(email or "").strip().lower() or "Grok OAuth Account",
-                "concurrency": 1,
+                "concurrency": 3,
                 "priority": 50,
                 "group_ids": [selected_group_id] if selected_group_id else [],
             },
@@ -342,7 +387,7 @@ def import_grok_sso_to_sub2api(
             json={
                 "sso_token": token,
                 "name": str(email or "").strip().lower() or "Grok OAuth Account",
-                "concurrency": 1,
+                "concurrency": 3,
                 "priority": 50,
                 "group_ids": [selected_group_id] if selected_group_id else [],
             },
@@ -424,9 +469,12 @@ def probe_grok_account_in_sub2api(
             json={"model_id": str(model or "grok-4.5"), "prompt": "hi"},
         )
         if response.status_code >= 300:
+            retryable = response.status_code == 429
             return {
                 "ok": False,
-                "available": False,
+                "available": None if retryable else False,
+                "retryable": retryable,
+                "classification": "rate_limited" if retryable else "upstream_rejected",
                 "target": "sub2api",
                 "status_code": response.status_code,
                 "error": _error_text(response),
@@ -531,7 +579,7 @@ def import_chatgpt_to_sub2api(
                 "content": json.dumps({"auth_mode": "agentIdentity", "agent_identity": agent_identity}, ensure_ascii=False),
                 "name": agent_identity["email"] or f"ChatGPT {agent_identity['agent_runtime_id'][:8]}",
                 "group_ids": [selected_group_id] if selected_group_id else [],
-                "concurrency": 1,
+                "concurrency": 3,
                 "priority": 50,
                 "rate_multiplier": 1.0,
                 "auto_pause_on_expired": False,

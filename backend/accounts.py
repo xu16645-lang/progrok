@@ -448,7 +448,7 @@ def _import_chatgpt_agent_identity(
                     "email": email,
                     "plan_type": str(agent_id.get("plan_type") or "free"),
                 },
-                "concurrency": 1,
+                "concurrency": 3,
                 "priority": 50,
                 "rate_multiplier": 1.0,
                 "auto_pause_on_expired": False,

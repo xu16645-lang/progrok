@@ -27,6 +27,21 @@ def _retry_import_now(
     config = dict(sess.get("_post_registration") or {})
     config.update(dict(post_registration or {}))
     target = str(config.get("target") or "sub2api").lower()
+    if bool(config.get("pre_import_probe_enabled", True)):
+        probe = sess.get("probe") if isinstance(sess.get("probe"), dict) else {}
+        probe_ok = int(probe.get("ok") or 0)
+        probe_count = int(probe.get("count") or 0)
+        if (
+            probe_count <= 0
+            or probe_ok < probe_count
+            or int(probe.get("fail") or 0) > 0
+            or int(probe.get("uncertain") or 0) > 0
+        ):
+            return {
+                "ok": False,
+                "session_id": sid,
+                "error": "导入前测活尚未通过，请先完成测活",
+            }
     with ctx._lock:
         current = ctx._sessions.get(sid) or dict(sess)
         current["status"] = "auto_importing"
@@ -57,13 +72,7 @@ def _retry_import_now(
         for account_id in account_ids:
             try:
                 record = model_health._load_record(account_id)
-                if not ctx.wait_pipeline_stagger(
-                    "import",
-                    config.get("import_stagger_ms") or 0,
-                    should_cancel=lambda: ctx._session_pause_requested(
-                        ctx._load_reg_sess(sid) or {}
-                    ),
-                ):
+                if ctx._session_pause_requested(ctx._load_reg_sess(sid) or {}):
                     ctx._mark_pipeline_paused(sid)
                     return {"ok": False, "paused": True, "error": "batch paused"}
                 response = import_account(record, config)
@@ -146,6 +155,22 @@ def retry_registration_import(
             "already_running": True,
             "queued": status == "import_queued",
         }
+    config = dict(sess.get("_post_registration") or {})
+    config.update(dict(post_registration or {}))
+    if bool(config.get("pre_import_probe_enabled", True)):
+        probe = sess.get("probe") if isinstance(sess.get("probe"), dict) else {}
+        probe_count = int(probe.get("count") or 0)
+        if (
+            probe_count <= 0
+            or int(probe.get("ok") or 0) < probe_count
+            or int(probe.get("fail") or 0) > 0
+            or int(probe.get("uncertain") or 0) > 0
+        ):
+            return {
+                "ok": False,
+                "session_id": sid,
+                "error": "导入前测活尚未通过，请先完成测活",
+            }
     ctx.threading.Thread(
         target=ctx._retry_import_now,
         args=(sid, post_registration),

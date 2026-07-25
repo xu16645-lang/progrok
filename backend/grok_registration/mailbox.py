@@ -77,7 +77,7 @@ def make_email_receiver(
             elif provider_name == "cfmail":
                 default_base = "https://temp-email-api.awsl.uk"
             elif provider_name == "stalwart":
-                default_base = "http://mail.gptfree.jo3.org"
+                default_base = ""
             else:
                 default_base = "https://moemail.521884.xyz"
             self.base_url = mailbox_base_url or default_base

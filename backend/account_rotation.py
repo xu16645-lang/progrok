@@ -5,6 +5,7 @@ import json
 import os
 import threading
 import time
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
@@ -23,6 +24,7 @@ _meta: dict[str, Any] = {}
 _scheduler_thread: threading.Thread | None = None
 _scheduler_stop = threading.Event()
 _poll_running = False
+_REPLACE_RETRY_DELAYS = (0.01, 0.02, 0.05, 0.1, 0.2)
 
 
 def _now() -> float:
@@ -48,11 +50,24 @@ def _record_id(account_type: str, email: str, session_id: str) -> str:
 
 def _atomic_write(payload: dict[str, Any]) -> None:
     STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    temporary = STATE_PATH.with_suffix(f".tmp.{os.getpid()}")
-    temporary.write_text(
-        json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    temporary = STATE_PATH.with_suffix(
+        f".tmp.{os.getpid()}.{uuid.uuid4().hex}"
     )
-    os.replace(temporary, STATE_PATH)
+    try:
+        temporary.write_text(
+            json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        for attempt in range(len(_REPLACE_RETRY_DELAYS) + 1):
+            try:
+                os.replace(temporary, STATE_PATH)
+                break
+            except PermissionError:
+                if attempt >= len(_REPLACE_RETRY_DELAYS):
+                    raise
+                time.sleep(_REPLACE_RETRY_DELAYS[attempt])
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
 def _load_locked() -> None:
@@ -146,6 +161,34 @@ def record_imported_session(account_type: str, session: dict[str, Any]) -> dict[
     auto_import = session.get("auto_import") if isinstance(session.get("auto_import"), dict) else {}
     imported_at = _imported_at(session, _as_timestamp(session.get("updated_at"), _now()))
     registered_at = _registration_finished_at(session, normalized_type)
+    probe_summary = session.get("probe") if isinstance(session.get("probe"), dict) else {}
+    probe_results = probe_summary.get("results") if isinstance(probe_summary.get("results"), list) else []
+    probe_result = next(
+        (
+            item
+            for item in probe_results
+            if isinstance(item, dict)
+            and (
+                not account_id
+                or not item.get("account_id")
+                or str(item.get("account_id")) == account_id
+            )
+        ),
+        None,
+    )
+    probe_succeeded = bool(
+        isinstance(probe_result, dict)
+        and (probe_result.get("ok") or probe_result.get("available") is True)
+    )
+    probe_retryable = bool(
+        isinstance(probe_result, dict)
+        and (probe_result.get("retryable") or probe_result.get("status_code") == 429)
+    )
+    probe_error = _request_error(probe_result) if isinstance(probe_result, dict) else ""
+    probe_reply = _text(
+        (probe_result or {}).get("reply") or (probe_result or {}).get("message"), 420
+    )
+    probe_at = _as_timestamp(session.get("updated_at"), imported_at) if probe_result else None
     record_id = _record_id(normalized_type, email, session_id)
     with _lock:
         _load_locked()
@@ -158,7 +201,7 @@ def record_imported_session(account_type: str, session: dict[str, Any]) -> dict[
         credential_source = _text(
             oauth.get("path") or existing.get("credential_source"), 80
         )
-        if existing and all(
+        if existing and not probe_result and all(
             existing.get(key) == value
             for key, value in {
                 "email": email or existing.get("email") or "未记录邮箱",
@@ -184,11 +227,11 @@ def record_imported_session(account_type: str, session: dict[str, Any]) -> dict[
             "imported_to_site": True,
             "registered_at": _as_timestamp(existing.get("registered_at"), registered_at),
             "imported_at": _as_timestamp(existing.get("imported_at"), imported_at),
-            "status": _text(existing.get("status") or "normal", 20),
-            "request_status": _text(existing.get("request_status") or "等待首次探活", 500),
-            "last_probe_at": existing.get("last_probe_at"),
-            "last_probe_result": _text(existing.get("last_probe_result"), 500),
-            "probe_state": _text(existing.get("probe_state") or "idle", 20),
+            "status": "normal" if probe_succeeded else _text(existing.get("status") or ("normal" if probe_retryable else "error" if probe_result else "normal"), 20),
+            "request_status": "正常" if probe_succeeded else probe_error if probe_result else _text(existing.get("request_status") or "等待首次探活", 500),
+            "last_probe_at": probe_at or existing.get("last_probe_at"),
+            "last_probe_result": probe_reply or ("正常" if probe_succeeded else probe_error) if probe_result else _text(existing.get("last_probe_result"), 500),
+            "probe_state": "uncertain" if probe_retryable else "complete" if probe_result else _text(existing.get("probe_state") or "idle", 20),
             "updated_at": _now(),
         }
         _records[record_id] = record
@@ -364,24 +407,39 @@ def _probe_record(record: dict[str, Any], config: dict[str, Any]) -> dict[str, A
 
         return probe_chatgpt_session(session, model)
 
-    if _text(record.get("credential_source"), 80) == "sub2api_login_callback":
-        from account_pipeline import probe_grok_account_in_sub2api
-
-        return probe_grok_account_in_sub2api(
-            _text(record.get("account_id"), 180),
-            model=_text(config.get("probe_model") or "grok-4.5", 100),
-            base_url=_text(config.get("sub2api_base_url"), 500),
-            api_key=_text(config.get("sub2api_api_key"), 500),
-            auth_mode=_text(config.get("sub2api_auth_mode") or "password", 20),
-            admin_email=_text(config.get("sub2api_admin_email"), 320),
-            admin_password=str(config.get("sub2api_admin_password") or ""),
-        )
-
     from account_pipeline import probe_account
 
     return probe_account(
         _load_xai_record(record),
         _text(config.get("probe_model") or "grok-4.5", 100),
+    )
+
+
+def probe_registration_account(
+    account_type: str,
+    *,
+    email: str,
+    account_id: str,
+    session_id: str,
+    session_file: str,
+    config: dict[str, Any],
+) -> dict[str, Any]:
+    """Probe a newly registered account through the same path as rotation."""
+    normalized_type = "chatgpt" if str(account_type).lower() == "chatgpt" else "xai"
+    probe_config = dict(config)
+    if normalized_type == "xai" and not probe_config.get("probe_model"):
+        probe_config["probe_model"] = probe_config.get("model")
+    if normalized_type == "chatgpt" and not probe_config.get("chatgpt_probe_model"):
+        probe_config["chatgpt_probe_model"] = probe_config.get("model")
+    return _probe_record(
+        {
+            "account_type": normalized_type,
+            "email": _text(email, 320).lower(),
+            "account_id": _text(account_id, 180),
+            "source_session_id": _text(session_id, 160),
+            "source_session_file": _text(session_file, 600),
+        },
+        probe_config,
     )
 
 
@@ -395,6 +453,8 @@ def _request_error(result: dict[str, Any]) -> str:
 
 def _finish_probe(record_id: str, result: dict[str, Any]) -> None:
     succeeded = bool(result.get("ok") or result.get("available") is True)
+    status_code = result.get("status_code")
+    retryable = bool(result.get("retryable")) or status_code == 429
     now = _now()
     with _lock:
         _load_locked()
@@ -402,11 +462,14 @@ def _finish_probe(record_id: str, result: dict[str, Any]) -> None:
         if record is None:
             return
         error = _request_error(result)
-        record["status"] = "normal" if succeeded else "error"
+        if succeeded:
+            record["status"] = "normal"
+        elif not retryable:
+            record["status"] = "error"
         record["request_status"] = "正常" if succeeded else error
         record["last_probe_result"] = "正常" if succeeded else error
         record["last_probe_at"] = now
-        record["probe_state"] = "complete"
+        record["probe_state"] = "uncertain" if retryable else "complete"
         record["updated_at"] = now
         _records[record_id] = record
         _save_locked()

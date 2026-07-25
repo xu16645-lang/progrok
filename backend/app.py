@@ -74,15 +74,16 @@ CHATGPT_SUB2API_MODELS = [
 
 DEFAULT_CONFIG: dict[str, Any] = {
     "registration_target": "grok",
-    "mail_provider": "yyds",
+    "registration_mode": "browser",
+    "mail_provider": "custom",
     "mail_api_key": "",
-    "mail_base_url": "https://maliapi.215.im",
+    "mail_base_url": "",
     "mail_domain": "",
     "mail_prefix": "",
     "mail_expiry_ms": 86400000,
     "mail_provider_configs": {
         "yyds": {
-            "mail_base_url": "https://maliapi.215.im",
+            "mail_base_url": "",
             "mail_api_key": "",
             "mail_domain": "",
         },
@@ -91,10 +92,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "mail_api_key": "",
             "mail_domain": "",
         },
-        "stalwart": {
-            "mail_base_url": "http://mail.gptfree.jo3.org",
+        "cloudflare_grokfree": {
+            "mail_base_url": "",
             "mail_api_key": "",
-            "mail_domain": "gptfree.jo3.org",
+            "mail_domain": "",
+        },
+        "stalwart": {
+            "mail_base_url": "",
+            "mail_api_key": "",
+            "mail_domain": "",
         },
     },
     "hotmail_local_base_url": "http://127.0.0.1:17373",
@@ -117,6 +123,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "probe_stagger_ms": 10000,
     "import_concurrency": 1,
     "import_stagger_ms": 10000,
+    "pre_import_probe_enabled": True,
     "auto_import_enabled": False,
     "auto_import_target": "sub2api",
     "registration_json_format": "cpa",
@@ -180,9 +187,16 @@ registration = _get_registration_adapter()
 
 class Settings(BaseModel):
     registration_target: Literal["grok", "chatgpt"] = "grok"
-    mail_provider: Literal["yyds", "custom", "stalwart", "hotmail_local"] = "yyds"
+    registration_mode: Literal["protocol", "browser"] = "browser"
+    mail_provider: Literal[
+        "yyds",
+        "custom",
+        "cloudflare_grokfree",
+        "stalwart",
+        "hotmail_local",
+    ] = "custom"
     mail_api_key: str = ""
-    mail_base_url: str = "https://maliapi.215.im"
+    mail_base_url: str = ""
     mail_domain: str = ""
     mail_prefix: str = ""
     mail_expiry_ms: int = Field(86400000, ge=60000, le=604800000)
@@ -196,7 +210,7 @@ class Settings(BaseModel):
     proxy_password: str = ""
     proxy_strategy: Literal["round_robin", "random", "sticky"] = "round_robin"
     count: int = Field(1, ge=0, le=10000)
-    concurrency: int = Field(1, ge=0, le=10)
+    concurrency: int = Field(1, ge=1, le=8)
     stagger_ms: int = Field(1200, ge=0, le=60000)
     chatgpt_step_delay_ms: int = Field(3000, ge=0, le=30000)
     auto_tune_enabled: bool = False
@@ -207,6 +221,7 @@ class Settings(BaseModel):
     probe_stagger_ms: int = Field(10000, ge=0, le=60000)
     import_concurrency: int = Field(1, ge=1, le=10)
     import_stagger_ms: int = Field(10000, ge=0, le=60000)
+    pre_import_probe_enabled: bool = True
     auto_import_enabled: bool = False
     auto_import_target: Literal["cpa", "sub2api"] = "sub2api"
     registration_json_format: Literal["cpa", "sub2api"] = "cpa"

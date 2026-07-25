@@ -40,7 +40,7 @@ def mail_provider_presets(ctx, response):
         "providers": {
             "yyds": {
                 "available": True,
-                "mail_base_url": "https://maliapi.215.im",
+                "mail_base_url": "",
                 "mail_api_key": "",
                 "mail_domain": "",
             },
@@ -50,11 +50,17 @@ def mail_provider_presets(ctx, response):
                 "mail_api_key": "",
                 "mail_domain": "",
             },
+            "cloudflare_grokfree": {
+                "available": True,
+                "mail_base_url": "",
+                "mail_api_key": "",
+                "mail_domain": "",
+            },
             "stalwart": {
                 "available": True,
-                "mail_base_url": "http://mail.gptfree.jo3.org",
+                "mail_base_url": "",
                 "mail_api_key": "",
-                "mail_domain": "gptfree.jo3.org",
+                "mail_domain": "",
             },
             "hotmail_local": {
                 "available": True,
@@ -132,8 +138,11 @@ def hotmail_delete_unhealthy(ctx):
 def hotmail_delete(ctx, account_id):
     from hotmail_local import delete_account, list_accounts
 
-    if not delete_account(account_id):
-        raise ctx.HTTPException(status_code=404, detail="邮箱账号不存在")
+    try:
+        if not delete_account(account_id):
+            raise ctx.HTTPException(status_code=404, detail="邮箱账号不存在")
+    except RuntimeError as exc:
+        raise ctx.HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": True, "pool": list_accounts()}
 
 
@@ -153,6 +162,13 @@ def put_config(ctx, settings):
 
 def start_register(ctx, settings=None, paused=False):
     cfg = settings.model_dump() if settings else ctx.load_config()
+    requested_target = str(cfg.get("registration_target") or "grok").strip().lower()
+    if requested_target == "chatgpt":
+        raise ctx.HTTPException(status_code=400, detail="ChatGPT 注册暂时停用")
+    registration_mode = str(cfg.get("registration_mode") or "browser").lower()
+    if registration_mode == "protocol":
+        raise ctx.HTTPException(status_code=400, detail="半协议注册暂时停用")
+    cfg["registration_mode"] = "browser"
     selected_format = str(
         cfg.get("registration_json_format") or cfg.get("auto_import_target") or "cpa"
     ).lower()
@@ -171,11 +187,14 @@ def start_register(ctx, settings=None, paused=False):
             raise ctx.HTTPException(
                 status_code=400, detail="微软邮箱账户池没有可用邮箱，请先导入或恢复邮箱"
             )
-        cfg["count"] = available
+        requested_count = int(cfg.get("count") or 0)
+        if requested_count < 1:
+            raise ctx.HTTPException(status_code=400, detail="注册数量必须大于 0")
+        cfg["count"] = min(requested_count, available)
     elif int(cfg.get("count") or 0) < 1:
         raise ctx.HTTPException(status_code=400, detail="注册数量必须大于 0")
     cfg["concurrency"] = min(
-        max(1, int(cfg.get("concurrency") or 1)), int(cfg["count"])
+        8, int(cfg["count"]), max(1, int(cfg.get("concurrency") or 1))
     )
     if settings is not None:
         persisted = ctx.load_config()
@@ -187,6 +206,7 @@ def start_register(ctx, settings=None, paused=False):
         persisted["chatgpt_probe_model"] = cfg["chatgpt_probe_model"]
         persisted["import_concurrency"] = cfg["import_concurrency"]
         persisted["registration_target"] = cfg["registration_target"]
+        persisted["registration_mode"] = cfg["registration_mode"]
         persisted["sub2api_group_id"] = cfg["sub2api_group_id"]
         persisted["sub2api_group_name"] = cfg["sub2api_group_name"]
         persisted["sub2api_xai_group_id"] = cfg["sub2api_xai_group_id"]
@@ -218,6 +238,7 @@ def start_register(ctx, settings=None, paused=False):
         kwargs.update(
             {
                 "captcha_provider": cfg["captcha_provider"],
+                "registration_mode": cfg["registration_mode"],
                 "local_solver_url": cfg["local_solver_url"],
                 "yescaptcha_key": cfg["yescaptcha_key"],
                 "prefix": cfg["mail_prefix"],
@@ -382,8 +403,27 @@ def retry_session_probe(ctx, session_id):
     adapter = ctx._get_registration_adapter(target)
     cfg = ctx.load_config()
     cfg["registration_target"] = target
+    session = adapter.get_registration_session(session_id)
+    if not session:
+        raise ctx.HTTPException(status_code=404, detail="registration session not found")
+    post_registration = ctx._post_registration_config(cfg)
+    stored_import = (
+        session.get("auto_import")
+        if isinstance(session.get("auto_import"), dict)
+        else {}
+    )
+    post_registration["auto_import_enabled"] = bool(stored_import.get("enabled"))
+    post_registration["pre_import_probe_enabled"] = bool(
+        session.get("pre_import_probe_enabled", True)
+    )
+    stored_target = str(
+        stored_import.get("target") or session.get("registration_json_format") or ""
+    ).lower()
+    if stored_target in {"cpa", "sub2api"}:
+        post_registration["target"] = stored_target
+        post_registration["output_format"] = stored_target
     result = adapter.retry_registration_probe(
-        session_id, ctx._post_registration_config(cfg)
+        session_id, post_registration
     )
     if not result.get("ok"):
         raise ctx.HTTPException(status_code=400, detail=result)
@@ -428,8 +468,28 @@ def retry_session_import(ctx, session_id):
     adapter = ctx._get_registration_adapter(target)
     cfg = ctx.load_config()
     cfg["registration_target"] = target
+    session = adapter.get_registration_session(session_id)
+    if not session:
+        raise ctx.HTTPException(status_code=404, detail="registration session not found")
+    stored_target = str(
+        (session.get("auto_import") or {}).get("target")
+        if isinstance(session.get("auto_import"), dict)
+        else ""
+    ).lower()
+    stored_format = str(session.get("registration_json_format") or "").lower()
+    import_target = (
+        stored_target
+        if stored_target in {"cpa", "sub2api"}
+        else stored_format if stored_format in {"cpa", "sub2api"} else "sub2api"
+    )
+    post_registration = ctx._post_registration_config(cfg)
+    post_registration["target"] = import_target
+    post_registration["output_format"] = import_target
+    post_registration["pre_import_probe_enabled"] = bool(
+        session.get("pre_import_probe_enabled", True)
+    )
     result = adapter.retry_registration_import(
-        session_id, ctx._post_registration_config(cfg)
+        session_id, post_registration
     )
     if not result.get("ok"):
         raise ctx.HTTPException(status_code=400, detail=result)

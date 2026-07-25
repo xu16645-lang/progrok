@@ -23,7 +23,14 @@ def load_config(ctx):
         provider = str(data.get("mail_provider") or "").lower()
         data["mail_provider"] = (
             provider
-            if provider in {"yyds", "custom", "stalwart", "hotmail_local"}
+            if provider
+            in {
+                "yyds",
+                "custom",
+                "cloudflare_grokfree",
+                "stalwart",
+                "hotmail_local",
+            }
             else "custom"
         )
         raw_profiles = data.get("mail_provider_configs")
@@ -34,7 +41,12 @@ def load_config(ctx):
                 if "maliapi.215.im" in str(data.get("mail_base_url") or "")
                 else data["mail_provider"]
             )
-            if migrated_provider in {"yyds", "custom", "stalwart"}:
+            if migrated_provider in {
+                "yyds",
+                "custom",
+                "cloudflare_grokfree",
+                "stalwart",
+            }:
                 profiles[migrated_provider] = {
                     "mail_base_url": str(data.get("mail_base_url") or ""),
                     "mail_api_key": str(data.get("mail_api_key") or ""),
@@ -51,9 +63,13 @@ def load_config(ctx):
             data["chatgpt_headless"] = True
         if "grok_headless" not in loaded:
             data["grok_headless"] = True
-        target = str(data.get("registration_target") or "grok").strip().lower()
-        data["registration_target"] = (
-            target if target in {"grok", "chatgpt"} else "grok"
+        # ChatGPT registration is temporarily disabled. Existing account,
+        # import and probe data remain available; only the registration target
+        # is migrated back to Grok.
+        data["registration_target"] = "grok"
+        registration_mode = str(data.get("registration_mode") or "browser").lower()
+        data["registration_mode"] = (
+            registration_mode if registration_mode in {"protocol", "browser"} else "browser"
         )
         selected_format = str(data.get("registration_json_format") or "cpa").lower()
         data["registration_json_format"] = (
@@ -90,7 +106,7 @@ def save_config(ctx, data):
     }
     profiles = ctx._normalize_mail_provider_configs(clean.get("mail_provider_configs"))
     active_provider = str(clean.get("mail_provider") or "").lower()
-    if active_provider in {"yyds", "custom", "stalwart"}:
+    if active_provider in {"yyds", "custom", "cloudflare_grokfree", "stalwart"}:
         profiles[active_provider] = {
             "mail_base_url": str(clean.get("mail_base_url") or ""),
             "mail_api_key": str(clean.get("mail_api_key") or ""),
@@ -102,8 +118,11 @@ def save_config(ctx, data):
         selected_format if selected_format in {"cpa", "sub2api"} else "cpa"
     )
     clean["auto_import_target"] = clean["registration_json_format"]
-    target = str(clean.get("registration_target") or "grok").strip().lower()
-    clean["registration_target"] = target if target in {"grok", "chatgpt"} else "grok"
+    clean["registration_target"] = "grok"
+    registration_mode = str(clean.get("registration_mode") or "browser").lower()
+    clean["registration_mode"] = (
+        registration_mode if registration_mode in {"protocol", "browser"} else "browser"
+    )
     clean["sub2api_chatgpt_models"] = list(ctx.CHATGPT_SUB2API_MODELS)
     with ctx._config_lock:
         ctx.CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -121,11 +140,17 @@ def _normalize_mail_provider_configs(ctx, value):
     raw = value if isinstance(value, dict) else {}
     result: dict[str, dict[str, str]] = {}
     defaults = ctx.DEFAULT_CONFIG.get("mail_provider_configs") or {}
-    for provider in ("yyds", "custom", "stalwart"):
+    for provider in ("yyds", "custom", "cloudflare_grokfree", "stalwart"):
         item = raw.get(provider) if isinstance(raw.get(provider), dict) else {}
         fallback = (
             defaults.get(provider) if isinstance(defaults.get(provider), dict) else {}
         )
+        if provider == "cloudflare_grokfree" and not item:
+            custom = raw.get("custom") if isinstance(raw.get("custom"), dict) else {}
+            item = {
+                **fallback,
+                "mail_api_key": str(custom.get("mail_api_key") or ""),
+            }
         result[provider] = {
             key: str(item.get(key, fallback.get(key, "")) or "")
             for key in ("mail_base_url", "mail_api_key", "mail_domain")
@@ -183,6 +208,13 @@ def _post_registration_config(ctx, cfg):
     return {
         "model": probe_model,
         "registration_target": registration_target,
+        "registration_mode": (
+            str(cfg.get("registration_mode") or "browser").lower()
+            if registration_target == "grok"
+            and str(cfg.get("registration_mode") or "browser").lower()
+            in {"protocol", "browser"}
+            else "browser"
+        ),
         "step_delay_ms": int(cfg.get("chatgpt_step_delay_ms") or 0),
         "pipeline_concurrency": int(cfg.get("concurrency") or 1),
         "probe_concurrency": int(
@@ -193,6 +225,9 @@ def _post_registration_config(ctx, cfg):
             cfg.get("import_concurrency") or cfg.get("concurrency") or 1
         ),
         "import_stagger_ms": int(cfg.get("import_stagger_ms") or 0),
+        "pre_import_probe_enabled": bool(
+            cfg.get("pre_import_probe_enabled", True)
+        ),
         "auto_import_enabled": bool(cfg.get("auto_import_enabled")),
         "target": cfg.get("auto_import_target") or "sub2api",
         "output_format": cfg.get("registration_json_format") or "cpa",

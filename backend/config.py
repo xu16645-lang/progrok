@@ -9,7 +9,7 @@ DATA_DIR = APP_DIR / "runtime" / "data"
 AUTH_FILE = DATA_DIR / "auth.json"
 
 MOEMAIL_API_KEY = os.getenv("GROK2API_MOEMAIL_API_KEY", os.getenv("MOEMAIL_API_KEY", ""))
-MOEMAIL_BASE_URL = os.getenv("GROK2API_MOEMAIL_BASE_URL", os.getenv("MOEMAIL_BASE_URL", "https://maliapi.215.im"))
+MOEMAIL_BASE_URL = os.getenv("GROK2API_MOEMAIL_BASE_URL", os.getenv("MOEMAIL_BASE_URL", ""))
 MOEMAIL_DOMAIN = os.getenv("GROK2API_MOEMAIL_DOMAIN", os.getenv("MOEMAIL_DOMAIN", ""))
 MOEMAIL_EXPIRY_MS = int(os.getenv("GROK2API_MOEMAIL_EXPIRY_MS", os.getenv("MOEMAIL_EXPIRY_MS", "86400000")))
 

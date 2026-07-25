@@ -69,6 +69,55 @@ class AccountRotationTests(unittest.TestCase):
         self.assertNotIn("source_session_file", page["items"][0])
         self.assertTrue(self.state_path.exists())
 
+    def test_rotation_state_retries_transient_windows_replace_lock(self) -> None:
+        real_replace = account_rotation.os.replace
+        attempts = []
+
+        def replace(source, target):
+            attempts.append((source, target))
+            if len(attempts) < 3:
+                raise PermissionError("target temporarily locked")
+            return real_replace(source, target)
+
+        with (
+            patch.object(account_rotation, "_REPLACE_RETRY_DELAYS", (0.0, 0.0)),
+            patch.object(account_rotation.os, "replace", side_effect=replace),
+        ):
+            account_rotation.record_imported_session(
+                "chatgpt", self.imported_session("retry@example.com")
+            )
+
+        self.assertEqual(len(attempts), 3)
+        self.assertTrue(self.state_path.is_file())
+        self.assertFalse(list(self.state_path.parent.glob("account_rotation.tmp.*")))
+
+    def test_imported_session_inherits_pre_import_probe_result(self) -> None:
+        session = self.imported_session("probed@example.com")
+        session["probe"] = {
+            "state": "complete",
+            "count": 1,
+            "ok": 1,
+            "fail": 0,
+            "results": [
+                {
+                    "account_id": "agent-1",
+                    "ok": True,
+                    "available": True,
+                    "status_code": 200,
+                    "reply": "upstream pong",
+                }
+            ],
+        }
+
+        record = account_rotation.record_imported_session("chatgpt", session)
+
+        self.assertIsNotNone(record)
+        self.assertEqual(record["status"], "normal")
+        self.assertEqual(record["request_status"], "正常")
+        self.assertEqual(record["last_probe_result"], "upstream pong")
+        self.assertEqual(record["probe_state"], "complete")
+        self.assertIsNotNone(record["last_probe_at"])
+
     def test_filter_and_probe_result_update(self) -> None:
         record = account_rotation.record_imported_session(
             "chatgpt", self.imported_session("match@example.com")
@@ -84,15 +133,18 @@ class AccountRotationTests(unittest.TestCase):
             while account_rotation.list_records()["poll"]["running"] and time.time() < deadline:
                 time.sleep(0.02)
 
-        item = account_rotation.list_records(status="error")["items"][0]
-        self.assertEqual(item["status"], "error")
+        item = account_rotation.list_records(status="normal")["items"][0]
+        self.assertEqual(item["status"], "normal")
         self.assertIn("429", item["request_status"])
+        self.assertEqual(item["probe_state"], "uncertain")
+        self.assertEqual(account_rotation.list_records(status="error")["total"], 0)
         self.assertIsNotNone(item["last_probe_at"])
 
     def test_imported_xai_uses_local_upstream_probe_even_when_imported_to_sub2api(self) -> None:
         record = {
             "account_type": "xai",
             "site_target": "sub2api",
+            "credential_source": "sub2api_login_callback",
             "email": "xai@example.com",
         }
         config = {
@@ -115,6 +167,26 @@ class AccountRotationTests(unittest.TestCase):
         self.assertEqual("local_upstream", result["probe_via"])
         loader.assert_called_once_with(record)
         probe.assert_called_once_with(local_record, "grok-4.5")
+
+    def test_registration_probe_reuses_rotation_probe_path(self) -> None:
+        with patch.object(
+            account_rotation,
+            "_probe_record",
+            return_value={"ok": True, "available": True},
+        ) as probe:
+            result = account_rotation.probe_registration_account(
+                "xai",
+                email="xai@example.com",
+                account_id="account-1",
+                session_id="session-1",
+                session_file="runtime/data/accounts/account-1.json",
+                config={"model": "grok-custom"},
+            )
+
+        self.assertTrue(result["ok"])
+        record, config = probe.call_args.args
+        self.assertEqual(record["account_id"], "account-1")
+        self.assertEqual(config["probe_model"], "grok-custom")
 
     def test_imported_chatgpt_uses_local_agent_identity_probe(self) -> None:
         record = {

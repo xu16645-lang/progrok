@@ -29,4 +29,18 @@ foreach ($location in @(
         Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
     }
 }
+
+# Camoufox can detach from the Python launcher, so process-tree cleanup alone
+# leaves registration and solver browsers running after the project stops.
+$CamoufoxRoot = Join-Path $env:LOCALAPPDATA "camoufox"
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.Name -eq "camoufox.exe" -and
+        $_.ExecutablePath -and
+        $_.ExecutablePath.StartsWith($CamoufoxRoot, [StringComparison]::OrdinalIgnoreCase)
+    } |
+    ForEach-Object {
+        Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue
+    }
+
 Write-Host "Stopped ProGrok background processes recorded by this project."

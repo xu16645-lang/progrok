@@ -23,7 +23,7 @@ main{width:min(1560px,calc(100% - 32px))}.workspace{display:grid;grid-template-c
 .pause-current{height:42px;white-space:nowrap;background:#302a20;color:#ffd792;border:1px solid #5d4c2d}.pause-current.resume{background:#173429;color:var(--accent);border-color:#28644f}
 .log-panel .tasks{overflow-x:hidden;scrollbar-width:thin}.log-panel .tasks::-webkit-scrollbar:horizontal{height:4px}.activity-item{min-width:0;max-width:100%}.activity-message{word-break:break-word}.safety-performance{display:grid;gap:4px;margin-top:16px;padding:13px 15px;border:1px solid #4e4934;border-radius:10px;background:#171914;text-align:left}.safety-performance span{color:#c8b98a;font-size:11px}.safety-performance strong{color:#f3f6f7;font-size:14px}.safety-performance small{color:#ffd08a;font-size:12px;line-height:1.55}
 .workflow-panel{display:grid;gap:6px;margin-top:10px;padding-top:9px;border-top:1px solid #243039}.workflow-head{display:flex;align-items:center;justify-content:space-between;color:#9aa8b1;font-size:10px}.workflow-head strong{padding:2px 7px;border:1px solid #34434b;border-radius:999px;color:#c4d0d6;font:700 10px/1.4 ui-monospace,Consolas,monospace}.flow-step{display:grid;grid-template-columns:24px minmax(0,1fr) 24px;align-items:center;gap:7px;min-height:29px;padding:4px 7px;border:1px solid #202c33;border-radius:7px;background:#0d1317;color:#63717a}.flow-number{display:grid;place-items:center;width:20px;height:20px;border:1px solid #40505a;border-radius:50%;font:700 10px/1 ui-monospace,Consolas,monospace}.flow-title{font-size:10px;font-weight:650}.flow-mark{text-align:center;font-size:12px;font-weight:800}.flow-step.done{color:#8c9aa2}.flow-step.done .flow-number,.flow-step.done .flow-mark{border-color:#63dcab;color:#63dcab}.flow-step.running{border-color:#285e88;color:#55aaff}.flow-step.running .flow-number{border-color:#338dda}.flow-step.running .flow-mark{color:#55aaff}.flow-step.skipped{color:#7893a5}.flow-step.skipped .flow-number,.flow-step.skipped .flow-mark{border-color:#338dda;color:#55aaff}.flow-step.failed{border-color:#6b3036;color:#ff9299;background:#171013}.flow-step.failed .flow-number{border-color:#e15661;color:#ff9299}.flow-step.failed .flow-mark{color:#ff646f}
-.hotmail-panel{display:grid;gap:12px;padding:14px;border:1px solid #2c4640;border-radius:11px;background:#0b1214}.hotmail-helper-row{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:9px}.hotmail-helper-row .inline-button{height:42px}.hotmail-panel textarea{font:12px/1.55 ui-monospace,Consolas,monospace}.hotmail-pool-head{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#cbd4da;font-size:12px;font-weight:700}.hotmail-account-list{display:grid;gap:7px;max-height:240px;overflow:auto}.hotmail-account{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#0d1317}.hotmail-account strong,.hotmail-account small{display:block;overflow-wrap:anywhere}.hotmail-account strong{font-size:12px}.hotmail-account small{margin-top:3px;color:var(--muted);font-size:10px}.hotmail-status{padding:3px 7px;border-radius:999px;background:#173429;color:var(--accent);font-size:10px}.hotmail-status.used{background:#2b2520;color:#e2b66d}.hotmail-status.reserved{background:#172b38;color:#8dccff}.hotmail-actions{display:flex;gap:6px}.hotmail-actions button{padding:6px 8px;border-radius:6px;font-size:10px}.danger-button{background:#302020;color:#ffaaaa;border:1px solid #593030}@media(max-width:760px){.hotmail-helper-row,.hotmail-account{grid-template-columns:1fr}.hotmail-helper-row .inline-button,.hotmail-actions{justify-self:start}}
+.hotmail-panel{display:grid;gap:12px;padding:14px;border:1px solid #2c4640;border-radius:11px;background:#0b1214}.hotmail-helper-row{display:grid;grid-template-columns:minmax(220px,.75fr) minmax(0,1.75fr) auto;align-items:end;gap:9px}.hotmail-helper-row .inline-button{height:42px}.hotmail-panel textarea{font:12px/1.55 ui-monospace,Consolas,monospace}.hotmail-pool-head{display:flex;align-items:center;justify-content:space-between;gap:12px;color:#cbd4da;font-size:12px;font-weight:700}.hotmail-account-list{display:grid;gap:7px;max-height:240px;overflow:auto}.hotmail-account{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:10px;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#0d1317}.hotmail-account strong,.hotmail-account small{display:block;overflow-wrap:anywhere}.hotmail-account strong{font-size:12px}.hotmail-account small{margin-top:3px;color:var(--muted);font-size:10px}.hotmail-status{padding:3px 7px;border-radius:999px;background:#173429;color:var(--accent);font-size:10px}.hotmail-status.used{background:#2b2520;color:#e2b66d}.hotmail-status.reserved{background:#172b38;color:#8dccff}.hotmail-actions{display:flex;gap:6px}.hotmail-actions button{padding:6px 8px;border-radius:6px;font-size:10px}.danger-button{background:#302020;color:#ffaaaa;border:1px solid #593030}@media(max-width:760px){.hotmail-helper-row,.hotmail-account{grid-template-columns:1fr}.hotmail-helper-row .inline-button,.hotmail-actions{justify-self:start}}
 .workflow-status-banner{display:flex;align-items:center;gap:10px;margin-top:15px;padding:11px 13px;border:1px solid #2a3941;border-radius:9px;background:#11191d;color:#9eabb3;font-size:12px}.workflow-status-dot{width:9px;height:9px;border-radius:50%;background:#65727a}.workflow-status-banner.running{border-color:#315d7c;color:#67b7ff}.workflow-status-banner.running .workflow-status-dot{background:#3fa7ff;box-shadow:0 0 10px rgba(63,167,255,.6)}.workflow-status-banner.success{border-color:#315e46;color:#72f0a7}.workflow-status-banner.success .workflow-status-dot{background:#72e62e}.workflow-status-banner.failed{border-color:#6a3035;color:#ff9299}.workflow-status-banner.failed .workflow-status-dot{background:#ff5964}.monitor-flow-head,.monitor-log-head{display:flex;align-items:center;justify-content:space-between;gap:12px}.monitor-flow-head{margin-top:14px;color:#8fa0aa;font-size:11px}.monitor-flow-head>div{min-width:0;display:grid;gap:3px}.monitor-flow-head small{max-width:260px;overflow:hidden;color:#c5d0d6;text-overflow:ellipsis;white-space:nowrap}.monitor-flow-head>strong{padding:3px 9px;border:1px solid #314149;border-radius:999px;color:#aab7be;font:700 11px/1.4 ui-monospace,Consolas,monospace}.monitor-workflow{display:grid;gap:7px;margin-top:9px}.monitor-flow-step{display:grid;grid-template-columns:29px minmax(0,1fr) 26px;align-items:center;gap:9px;min-height:36px;color:#68757d}.monitor-flow-number{display:grid;place-items:center;width:27px;height:27px;border:1px solid #3b4b54;border-radius:50%;font:700 11px/1 ui-monospace,Consolas,monospace}.monitor-flow-title{padding:9px 11px;border:1px solid #202d33;border-radius:7px;background:#11191d;font-size:11px;font-weight:650}.monitor-flow-mark{text-align:center;font-size:16px;font-weight:850}.monitor-flow-step.done .monitor-flow-number{border-color:#69de22;color:#8cf238}.monitor-flow-step.done .monitor-flow-mark{color:#7af02d}.monitor-flow-step.running .monitor-flow-number{border-color:#3d9dea;color:#55aaff}.monitor-flow-step.running .monitor-flow-title{border-color:#28547a;color:#55aaff;background:#101b24}.monitor-flow-step.running .monitor-flow-mark{color:#55aaff}.monitor-flow-step.skipped .monitor-flow-number{border-color:#3d9dea;color:#55aaff}.monitor-flow-step.skipped .monitor-flow-title{color:#55aaff}.monitor-flow-step.skipped .monitor-flow-mark{color:#55aaff;font-size:10px}.monitor-flow-step.failed .monitor-flow-number{border-color:#e15661;color:#ff9299}.monitor-flow-step.failed .monitor-flow-title{border-color:#6b3036;color:#ff9299;background:#1a1114}.monitor-flow-step.failed .monitor-flow-mark{color:#ff646f}.monitor-log-head{margin-top:15px;padding-top:12px;border-top:1px solid var(--line);color:#aebbc2;font-size:11px;font-weight:750}.monitor-log-head>div{display:flex;align-items:center;gap:10px}.monitor-log-head small{color:#6f7d85;font-weight:400}.log-clear{padding:0;border:0;background:transparent;color:#8dccff;font-size:10px}.monitor-log{flex:1;min-height:130px;margin-top:8px;padding:8px 10px;overflow:auto;border:1px solid #26343b;border-radius:8px;background:#091013;scrollbar-width:thin}.monitor-log-row{display:grid;grid-template-columns:56px 32px;column-gap:7px;padding:5px 0;border-bottom:1px solid #172329;font:10px/1.5 ui-monospace,Consolas,monospace;color:#9eabb2}.monitor-log-row:last-child{border-bottom:0}.monitor-log-row time{color:#6f8e98}.monitor-log-row strong{color:#55aaff}.monitor-log-row.success strong,.monitor-log-row.success .monitor-log-message{color:#79ee36}.monitor-log-row.warning strong{color:#f4c76b}.monitor-log-row.error strong,.monitor-log-row.error .monitor-log-message{color:#ff858d}.monitor-log-source,.monitor-log-message{grid-column:2/-1;overflow-wrap:anywhere}.monitor-log-source{color:#6f7c84}.monitor-log-message{margin-top:1px;color:#bdc8cd}.log-empty{padding:28px 8px;color:var(--muted);text-align:center;font-size:11px}.log-panel{overflow:hidden}.log-panel .results-head{flex:0 0 auto}@media(max-width:1180px){.monitor-log{min-height:180px}}@media(max-width:760px){.monitor-flow-head small{max-width:210px}.monitor-log-row{grid-template-columns:52px 30px}}
 .workspace{grid-template-columns:minmax(0,1.7fr) minmax(500px,1fr)}@media(max-width:1180px){.workspace{grid-template-columns:1fr}}
 .hotmail-pool-actions{display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}.hotmail-status.failed,.hotmail-status.unhealthy{background:#3a1f23;color:#ff8e96;border:1px solid #673139}.hotmail-status.healthy{background:#173429;color:var(--accent);border:1px solid #28644f}.hotmail-status.unchecked{background:#292720;color:#f4c76b;border:1px solid #554b2d}.hotmail-failure,.hotmail-health-error{color:#ff9299!important;line-height:1.45}@media(max-width:760px){.hotmail-pool-head{align-items:flex-start;flex-direction:column}.hotmail-pool-actions{justify-content:flex-start}}
@@ -34,12 +34,517 @@ main{width:min(1560px,calc(100% - 32px))}.workspace{display:grid;grid-template-c
 .monitor-log-message time{display:inline-block;margin-right:8px;color:#627983;font:10px/1.55 ui-monospace,Consolas,monospace}.monitor-log-message b{margin-right:3px}
 .config-panel,.side-column,.side-column .log-panel{height:1050px;min-height:1050px;max-height:1050px}.side-column .log-panel{display:flex}.monitor-workflow{flex:0 0 auto}.monitor-log{flex:1 1 auto;min-height:360px}.config-scroll{min-height:0}@media(max-width:1180px){.config-panel,.side-column .log-panel{height:980px;min-height:980px;max-height:980px}.side-column{height:auto;min-height:0;max-height:none}.monitor-log{min-height:320px}}@media(max-width:760px){.config-panel,.side-column .log-panel{height:920px;min-height:920px;max-height:920px}.monitor-log{min-height:280px}}
 .monitor-log{overflow-y:scroll;overflow-x:hidden;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#465862 #0b0f13}.monitor-log::-webkit-scrollbar{width:10px}.monitor-log::-webkit-scrollbar-track{background:#0b0f13;border-radius:8px}.monitor-log::-webkit-scrollbar-thumb{min-height:44px;background:#465862;border:2px solid #0b0f13;border-radius:8px}.monitor-log::-webkit-scrollbar-thumb:hover{background:#60727d}
+.monitor-workflow:has(.concurrent-flow-account){max-height:310px;overflow-y:auto;padding-right:4px;scrollbar-width:thin}.concurrent-flow-account{display:grid;gap:7px;padding:10px 11px;border:1px solid #293840;border-radius:8px;background:#0c1418}.concurrent-flow-account.running{border-color:#28547a}.concurrent-flow-account.failed{border-color:#6b3036}.concurrent-flow-account.done{border-color:#315e46}.concurrent-flow-head{display:flex;align-items:center;justify-content:space-between;gap:8px}.concurrent-flow-head strong{min-width:0;overflow:hidden;color:#d4dfe3;font-size:11px;text-overflow:ellipsis;white-space:nowrap}.concurrent-flow-head span{flex:0 0 auto;color:#7f929c;font:10px/1.4 ui-monospace,Consolas,monospace}.concurrent-flow-current{color:#55aaff;font-size:11px}.concurrent-flow-account.failed .concurrent-flow-current{color:#ff9299}.concurrent-flow-account.done .concurrent-flow-current{color:#7cf5c7}.concurrent-flow-dots{display:grid;grid-template-columns:repeat(9,minmax(0,1fr));gap:4px}.concurrent-flow-dot{display:grid;place-items:center;height:21px;border:1px solid #34434b;border-radius:5px;color:#65747c;font:700 9px/1 ui-monospace,Consolas,monospace}.concurrent-flow-dot.done{border-color:#39775e;background:#14271f;color:#7cf5c7}.concurrent-flow-dot.running{border-color:#338dda;background:#102338;color:#67b7ff}.concurrent-flow-dot.failed{border-color:#8a3941;background:#2b1519;color:#ff9299}.concurrent-flow-dot.skipped{border-color:#315d7c;color:#67b7ff}
 .module-nav{position:sticky;z-index:14;top:0;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:6px;margin:0 0 18px;padding:7px;border:1px solid #28343b;border-radius:14px;background:rgba(14,19,23,.94);box-shadow:0 14px 35px rgba(0,0,0,.24);backdrop-filter:blur(12px)}.module-nav-button{min-width:0;padding:11px 12px;border:1px solid transparent;background:transparent;color:#8f9ca5;font-size:13px;white-space:nowrap}.module-nav-button:hover{background:#182128;color:#dbe3e7;filter:none}.module-nav-button.active{border-color:#316f5b;background:linear-gradient(145deg,#18362d,#142a24);color:var(--accent);box-shadow:inset 0 0 0 1px rgba(124,245,199,.05)}.config-toolbar-title{display:none}.config-toolbar .actions{width:100%}.config-toolbar .actions button{white-space:nowrap}.config-module{min-height:100%}.config-module>.primary-setting{margin-top:0}.config-module>.section-title:first-child{margin-top:0}@media(max-width:760px){.module-nav{display:flex;overflow-x:auto;scrollbar-width:none}.module-nav::-webkit-scrollbar{display:none}.module-nav-button{flex:0 0 auto;padding:10px 14px}.config-module{min-height:0}}
 .probe-batch-control{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:end;gap:10px;padding:14px;border:1px solid #2c4640;border-radius:10px;background:#0b1214}.probe-batch-control button{height:42px;min-width:130px}.probe-batch-control select:disabled{color:#66727b}@media(max-width:760px){.probe-batch-control{grid-template-columns:1fr}.probe-batch-control button{width:100%}}
-.module-nav{grid-template-columns:repeat(6,minmax(0,1fr))}
+.module-nav{grid-template-columns:repeat(5,minmax(0,1fr))}
 .workspace.rotation-layout{grid-template-columns:minmax(0,1fr)}.workspace.rotation-layout>.side-column{display:none}
-.rotation-overview{display:flex;align-items:center;flex-wrap:wrap;gap:10px 18px;padding:4px 0 14px;border-bottom:1px solid var(--line);color:#aebac1;font-size:12px}.rotation-overview span{display:flex;align-items:baseline;gap:6px}.rotation-overview strong{font:700 18px/1 ui-monospace,Consolas,monospace;color:#dce7ea}.rotation-overview .normal strong{color:#7cf5c7}.rotation-overview .error strong{color:#ff9299}.rotation-overview small{margin-left:auto;color:#73828a;font-size:11px}
-.rotation-controls{display:grid;grid-template-columns:150px minmax(180px,1fr) 110px auto;align-items:end;gap:10px;margin-top:14px}.rotation-controls label{min-width:0}.rotation-controls select,.rotation-controls input,.rotation-controls button{height:42px}.rotation-search{min-width:0}.rotation-search input{width:100%}
-.rotation-bulk-actions{display:flex;align-items:center;gap:9px;min-height:42px;margin-top:12px;padding:9px 0;border-top:1px solid #202c32;border-bottom:1px solid #202c32}.rotation-select-all{display:flex;align-items:center;gap:6px;color:#cbd6da;font-size:12px}.rotation-select-all input{width:15px;height:15px}.rotation-bulk-actions>span{margin-right:auto;color:#74828b;font-size:11px}.rotation-bulk-actions button{min-height:32px}
+.rotation-overview{display:flex;min-width:0;align-items:center;flex-wrap:wrap;gap:8px 16px;color:#aebac1;font-size:11px}.rotation-overview span{display:flex;align-items:baseline;gap:5px}.rotation-overview strong{font:700 16px/1 ui-monospace,Consolas,monospace;color:#dce7ea}.rotation-overview .normal strong{color:#7cf5c7}.rotation-overview .error strong{color:#ff9299}.rotation-overview small{color:#73828a;font-size:10px}
+.rotation-controls{display:grid;grid-template-columns:150px minmax(180px,1fr) 110px auto;align-items:end;gap:10px}.rotation-controls label{min-width:0}.rotation-controls select,.rotation-controls input,.rotation-controls button{height:42px}.rotation-search{min-width:0}.rotation-search input{width:100%}
+.rotation-bulk-actions{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:52px;margin-top:12px;padding:9px 0;border-top:1px solid #202c32;border-bottom:1px solid #202c32}.rotation-bulk-meta{display:flex;min-width:0;align-items:center;flex-wrap:wrap;gap:7px 14px}.rotation-bulk-meta>#rotation-selection-count{color:#74828b;font-size:10px;white-space:nowrap}.rotation-bulk-buttons{display:flex;flex:0 0 auto;align-items:center;gap:9px}.rotation-bulk-actions button{min-height:32px}
 .rotation-table-wrap{margin-top:12px;overflow:auto;border:1px solid #26343b;border-radius:8px;background:#0b1115;scrollbar-width:thin;scrollbar-color:#455962 #0b1115}.rotation-table{width:100%;min-width:1260px;border-collapse:collapse;font-size:11px}.rotation-table th{position:sticky;top:0;z-index:1;padding:10px 9px;border-bottom:1px solid #2b3a42;background:#121a1f;color:#93a2aa;text-align:left;font-size:10px;font-weight:700;white-space:nowrap}.rotation-table td{padding:10px 9px;border-bottom:1px solid #1b282e;vertical-align:middle;color:#c9d4d8}.rotation-table tbody tr:hover{background:#111b20}.rotation-table tbody tr:last-child td{border-bottom:0}.rotation-table th:first-child,.rotation-table td:first-child{width:34px;text-align:center}.rotation-table td:nth-child(2){min-width:190px}.rotation-table td:nth-child(8){min-width:220px;max-width:340px}.rotation-table td:nth-child(9){min-width:108px;white-space:nowrap}.rotation-table input[type="checkbox"]{width:15px;height:15px}.rotation-account strong{display:block;max-width:250px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#e4ecef}.rotation-status{display:inline-flex;align-items:center;min-width:42px;padding:4px 7px;border:1px solid #2e624f;border-radius:999px;background:#143025;color:#7cf5c7;font-size:10px;justify-content:center}.rotation-status.error{border-color:#6b3036;background:#311b20;color:#ff9da4}.rotation-imported strong{display:block;color:#7cf5c7}.rotation-imported small{display:block;margin-top:2px;color:#7d909a;font-size:10px}.rotation-request{overflow-wrap:anywhere;word-break:break-word}.rotation-actions{display:flex;gap:6px}.rotation-actions button{padding:6px 9px;border-radius:6px;font-size:10px;white-space:nowrap}.rotation-empty{padding:34px!important;color:#73838b!important;text-align:center}.rotation-pagination{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;color:#788890;font-size:11px}.rotation-pagination>div{display:flex;align-items:center;gap:8px}.rotation-pagination button{min-height:32px;padding:6px 10px}.rotation-pagination span{white-space:nowrap}
-@media(max-width:1180px){.module-nav{grid-template-columns:repeat(3,minmax(0,1fr))}.rotation-table-wrap{max-height:560px}}@media(max-width:760px){.rotation-overview{gap:9px 13px}.rotation-overview small{width:100%;margin-left:0}.rotation-controls{grid-template-columns:1fr 1fr}.rotation-search{grid-column:1/-1}.rotation-controls button{width:100%}.rotation-bulk-actions{flex-wrap:wrap}.rotation-bulk-actions>span{margin-right:0;flex:1 1 120px}.rotation-pagination{align-items:flex-start;flex-direction:column}.rotation-table-wrap{max-height:500px}.module-nav{display:flex}}
+@media(max-width:1180px){.module-nav{grid-template-columns:repeat(3,minmax(0,1fr))}.rotation-table-wrap{max-height:560px}.rotation-bulk-actions{align-items:flex-start;flex-direction:column}.rotation-bulk-buttons{align-self:flex-end}}@media(max-width:760px){.rotation-overview{gap:7px 11px}.rotation-overview small{width:100%}.rotation-controls{grid-template-columns:1fr 1fr}.rotation-search{grid-column:1/-1}.rotation-controls button{width:100%}.rotation-bulk-buttons{width:100%;display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.rotation-bulk-buttons button{width:100%;padding-inline:6px}.rotation-pagination{align-items:flex-start;flex-direction:column}.rotation-table-wrap{max-height:500px}.module-nav{display:flex}}
+
+/* Reference layout: compact operations console */
+:root{--bg:#080d11;--panel:#0d1419;--panel-strong:#101820;--line:#25303a;--text:#edf2f5;--muted:#87939d;--accent:#55deb0;--danger:#ff7d83}
+body{min-width:0;background:#080d11}
+.lucide-sprite{position:absolute;width:0;height:0;overflow:hidden;pointer-events:none}
+.lucide-icon{display:block;flex:0 0 auto;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+main{width:min(1600px,calc(100% - 64px));margin:28px auto 34px}
+header{align-items:flex-start;margin-bottom:18px}
+.eyebrow{margin-bottom:3px;color:#58d9af;font-size:12px;letter-spacing:.08em}
+h1{font-size:44px;line-height:1.12;letter-spacing:0}
+.subtitle{margin-top:8px;font-size:13px}
+.header-actions{gap:8px;margin-top:2px}
+.header-actions .path-button,.header-actions .badge{height:45px;border-color:#26313a;border-radius:7px;background:#10161c;color:#d8e0e4;padding:0 15px;font-size:12px;gap:8px}
+.header-actions .path-button:hover{border-color:#40505a;background:#151d24}
+.header-actions .badge.ok{border-color:#26313a;color:#d8e0e4}
+.header-actions .badge.ok .lucide-icon{color:#65dfb7}
+.ui-icon{display:inline-grid;width:16px;height:16px;place-items:center;color:#c8d2d7;font-size:14px;line-height:1}
+.panel{border-color:#222d35;border-radius:8px;background:#0d1419;box-shadow:none}
+.module-nav{position:relative;top:auto;height:55px;margin-bottom:16px;padding:0 10px;border-color:#222d35;border-radius:8px;background:#0d1419;box-shadow:none;backdrop-filter:none}
+.module-nav-button{position:relative;display:flex;align-items:center;justify-content:center;gap:10px;border:0;border-radius:0;background:transparent;color:#aeb8bd;font-size:13px}
+.module-nav-button>.lucide-icon{width:18px;height:18px;color:#b9c3c8}
+.module-nav-button:hover{background:#101a20;color:#e7ecef}
+.module-nav-button.active{border:0;background:transparent;color:var(--accent);box-shadow:none}
+.module-nav-button.active>.lucide-icon{color:var(--accent)}
+.module-nav-button.active::after{position:absolute;right:0;bottom:-1px;left:0;height:2px;background:var(--accent);content:""}
+.workspace{grid-template-columns:minmax(0,1.82fr) minmax(420px,1fr);gap:14px}
+.config-panel{height:700px;min-height:700px;max-height:700px;border-radius:8px}
+.config-toolbar{min-height:82px;padding:14px 24px;border-color:#27323a;background:#0e151b}
+.config-toolbar-title{display:flex;align-items:center;gap:10px;color:#eef3f5;font-size:20px;font-weight:750;white-space:nowrap}
+.config-toolbar-title>.lucide-icon{width:23px;height:23px;color:#e3ebee}
+.config-toolbar .actions{width:auto;align-items:flex-end;gap:10px}
+.config-toolbar .actions label{min-width:255px}
+.config-toolbar .actions button{height:42px;border-radius:6px;padding:0 20px}
+.config-toolbar .actions .secondary,.config-toolbar .actions .pause-current{background:#111820;border:1px solid #2a3540;color:#d6dee2}
+.config-toolbar .actions #start{min-width:100px;background:#48c99e;color:#07120f}
+.config-scroll{padding:20px 24px 24px}
+input,select,textarea{border-color:#2b3741;border-radius:6px;background:#091015}
+button{border-radius:6px}
+[data-config-module="mail"]>.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:13px 15px}
+.hotmail-panel{margin-top:0;padding:0;border:0;background:transparent}
+.hotmail-helper-row{grid-template-columns:minmax(260px,.9fr) minmax(340px,1.2fr) auto;gap:14px;align-items:end}
+.hotmail-helper-row .inline-button{height:42px;padding:0 18px}
+#hotmail-import-text{height:96px;min-height:96px;max-height:96px}
+.hotmail-pool-head{align-items:flex-start;flex-direction:column;gap:12px;margin-top:2px;padding:0;border:0}
+#hotmail-pool-summary{color:#d5dde1;font-size:12px}
+.hotmail-pool-actions{justify-content:flex-start;gap:9px}
+.hotmail-pool-actions button{height:36px;padding:0 15px;background:#101820;border-color:#34414b;color:#d5dde1}
+.hotmail-pool-actions .danger-button{border-color:#6a3438;background:#151416;color:#ff858b}
+.hotmail-account-table{max-height:213px;overflow:auto;border:1px solid #2a3540;border-radius:6px;background:#091015;scrollbar-gutter:stable;scrollbar-width:thin}
+.hotmail-account-table-head,.hotmail-account{display:grid;grid-template-columns:minmax(260px,1.35fr) minmax(105px,.55fr) minmax(185px,.9fr) minmax(180px,.72fr);align-items:center;column-gap:14px}
+.hotmail-account-table-head{position:sticky;z-index:1;top:0;min-height:39px;padding:0 15px;background:#19212b;color:#b9c3c9;font-size:11px}
+.hotmail-account-table-head>span:last-child{text-align:center}
+.hotmail-account-list{display:block;max-height:none;overflow:visible;border:0;border-radius:0}
+.hotmail-account{min-height:64px;padding:9px 15px;border:0;border-bottom:1px solid #202b33;border-radius:0;background:transparent}
+.hotmail-account:last-child{border-bottom:0}
+.hotmail-account:hover{background:#0d161c}
+.hotmail-account-identity{min-width:0}
+.hotmail-account-identity strong{display:flex;align-items:center;gap:9px;min-width:0;overflow:hidden;color:#e6ecef;font-size:12px;font-weight:600;text-overflow:ellipsis;white-space:nowrap}
+.hotmail-account-identity strong i{flex:0 0 auto;width:8px;height:8px;border-radius:50%;background:#55d9ad;box-shadow:0 0 0 3px rgba(85,217,173,.08)}
+.hotmail-account-identity small{display:block;margin:3px 0 0 17px;color:#75858e;font-size:10px}
+.hotmail-credential{min-width:0}.hotmail-credential strong,.hotmail-credential small{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.hotmail-credential strong{color:#b7c2c7;font-size:11px;font-weight:500}.hotmail-credential small{margin-top:3px;color:#73818a;font-size:10px}
+.hotmail-status{justify-self:start;min-width:0;padding:4px 8px;border-radius:6px;font-size:10px}
+.hotmail-actions{display:flex;justify-content:center;gap:7px}
+.hotmail-actions button{height:32px;padding:0 10px;border-radius:5px;background:#10251f;color:#5de0b5;border:1px solid #28755e;font-size:10px;white-space:nowrap}
+.hotmail-actions .danger-button{border-color:#6a3035;background:#171316;color:#ff8087}
+.hotmail-pagination{display:grid;grid-template-columns:1fr auto 1fr;align-items:center;gap:12px;margin-top:10px;color:#8d9aa1;font-size:11px}
+.hotmail-pagination>label{justify-self:end;display:flex;align-items:center;flex-direction:row;gap:7px}
+.hotmail-pagination select{width:auto;height:34px;padding:0 30px 0 10px;font-size:11px}
+.hotmail-page-buttons{display:flex;align-items:center;justify-content:center;gap:4px}
+.hotmail-page-buttons button{width:31px;height:31px;padding:0;border:1px solid transparent;background:transparent;color:#aeb9be}
+.hotmail-page-buttons button:hover{background:#172028}.hotmail-page-buttons button.active{border-color:#3f9477;background:#2a9d7b;color:#effff9}.hotmail-page-buttons button:disabled{opacity:.35}.hotmail-page-buttons span{padding:0 3px}
+.side-column{display:grid;height:700px;min-height:700px;max-height:700px;grid-template-rows:390px minmax(0,1fr);gap:14px}
+.side-column>.panel{margin:0;padding:22px}
+.side-column .monitor-panel,.side-column .log-panel{position:static;height:auto!important;min-height:0!important;max-height:none!important}
+.monitor-panel{display:flex;min-height:0;overflow:hidden;flex-direction:column}
+.monitor-panel #summary,.monitor-panel .workflow-status-banner{display:none}
+.results-head{align-items:flex-start}
+.results .section-title{gap:7px;margin:0 0 8px;color:#eff3f5;font-size:15px}
+.results .section-title .monitor-title-icon{width:18px;height:18px;padding:0;border:0;color:#dce5e9}
+.results .section-title em{padding:3px 5px;border:1px solid #25644f;border-radius:4px;color:#55d9ad;font:10px/1 ui-monospace,Consolas,monospace;font-style:normal}
+.results-actions{display:flex;gap:7px}.results-actions button{height:30px;padding:0 10px;border-radius:5px;font-size:10px}.results-actions .reset-round{border-color:#653238;background:#151416;color:#ff7d83}
+.workflow-status-banner{min-height:43px;margin-top:16px;border-radius:6px}
+.monitor-flow-head{margin-top:16px;padding-top:14px;border-top:1px solid #202b33}
+.monitor-workflow{flex:1 1 auto;min-height:0;max-height:none;margin-top:10px;padding-right:4px;overflow-y:auto;align-content:start;border:1px dashed #2d3942;border-radius:6px;scroll-behavior:smooth;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:#40515b #091015}
+.monitor-panel .monitor-workflow:has(.concurrent-flow-account){max-height:none;overflow-y:auto}
+.monitor-workflow::-webkit-scrollbar{width:8px}.monitor-workflow::-webkit-scrollbar-track{background:#091015}.monitor-workflow::-webkit-scrollbar-thumb{min-height:34px;border:2px solid #091015;border-radius:8px;background:#40515b}
+.monitor-workflow .empty{padding:19px 10px}
+.monitor-log-panel{display:flex;min-height:0;flex-direction:column}
+.monitor-log-head{flex:0 0 auto;margin:0 0 14px;padding:0;border:0;color:#eff3f5;font-size:15px;font-weight:700}
+.monitor-log-head>span{display:flex;align-items:center;gap:8px}.monitor-log-head>span>.lucide-icon{width:15px;height:15px;color:#dce5e9}
+.monitor-log{flex:1 1 auto;min-height:0;margin:0;border-color:#26323b;border-radius:6px;background:#091015}
+.log-empty{display:grid;height:100%;min-height:190px;place-items:center;padding:20px;color:#77858d}
+
+@media(max-width:1180px){
+  main{width:min(1000px,calc(100% - 36px))}.workspace{grid-template-columns:1fr}.config-panel{height:760px;min-height:760px;max-height:760px}.side-column{height:auto;min-height:0;max-height:none;grid-template-rows:380px 420px}.module-nav{grid-template-columns:repeat(5,minmax(0,1fr))}
+}
+@media(max-width:760px){
+  main{width:calc(100% - 24px);margin:20px auto 28px}header{display:grid;gap:16px}h1{font-size:32px}.header-actions{width:100%;align-items:stretch;flex-direction:row;flex-wrap:wrap;justify-content:flex-start;margin:0}.header-actions .path-button,.header-actions .badge{height:40px}.module-nav{display:flex;height:52px;padding:0;overflow-x:auto}.module-nav-button{flex:0 0 auto;min-width:128px}.workspace{display:block}.config-panel{height:auto;min-height:720px;max-height:none}.config-toolbar{align-items:stretch;flex-direction:column;padding:15px 16px}.config-toolbar-title{font-size:18px}.config-toolbar .actions{display:grid;width:100%;grid-template-columns:1fr 1fr}.config-toolbar .actions label{min-width:0;grid-column:1/-1}.config-toolbar .actions button{width:100%;padding:0 9px}.config-scroll{padding:17px 15px 20px}[data-config-module="mail"]>.grid{grid-template-columns:1fr}.hotmail-helper-row{grid-template-columns:1fr}.hotmail-helper-row .inline-button{width:100%}.hotmail-pool-actions{display:grid;width:100%;grid-template-columns:1fr 1fr}.hotmail-pool-actions button{width:100%;padding:0 8px}.hotmail-account-table{overflow:auto}.hotmail-account-table-head,.hotmail-account{min-width:760px}.hotmail-pagination{grid-template-columns:1fr auto}.hotmail-pagination>label{grid-column:1/-1;grid-row:2;justify-self:start}.side-column{display:grid;margin-top:14px;grid-template-rows:360px 420px}.side-column>.panel{padding:17px}.results-head{gap:10px}.results .section-title{font-size:16px}.results-actions button{padding:0 9px}
+}
+
+/* Registration, rotation and monitor layouts matched to the console references. */
+.config-panel[data-active-module="registration"] .config-toolbar-title{display:none}
+.config-panel[data-active-module="registration"] .config-toolbar .actions{width:100%}
+.config-panel[data-active-module="registration"] .toolbar-format{width:min(43%,430px);margin-right:auto}
+.config-panel[data-active-module="registration"] .config-scroll{padding-top:18px}
+.registration-section-title{display:flex;align-items:center;gap:10px;margin:0 0 15px;color:#e3e9ec;font-size:14px}
+.registration-section-title .lucide-icon{width:19px;height:19px;color:#dbe5e8}
+.registration-section-title.captcha-title{margin-top:20px;padding-top:20px;border-top:1px solid #202b33}
+[data-config-module="registration"] .primary-setting{grid-template-columns:repeat(4,minmax(0,1fr));gap:13px 16px;margin:0;padding:0;border:0}
+[data-config-module="registration"] .primary-setting input,[data-config-module="registration"] .primary-setting select,[data-config-module="registration"]>.grid input,[data-config-module="registration"]>.grid select{height:42px}
+[data-config-module="registration"] .tune-toggle{min-height:46px;align-self:end;align-content:center}
+[data-config-module="registration"] .tune-toggle input{width:44px;height:24px;min-height:24px;padding:0;border-radius:999px}
+[data-config-module="registration"] .tune-toggle input::after{top:3px;left:3px;width:16px;height:16px}
+[data-config-module="registration"] .tune-toggle input:checked::after{left:23px}
+[data-config-module="registration"] .performance-profile{min-height:43px;display:flex;align-items:center;margin-top:2px;padding:0 14px;border-radius:6px;background:#091015}
+[data-config-module="registration"]>.grid{grid-template-columns:minmax(0,.9fr) minmax(0,1.35fr) minmax(0,.95fr);gap:16px}
+
+.config-panel[data-active-module="rotation"] .config-toolbar{min-height:88px;padding:16px 24px}
+.config-panel[data-active-module="rotation"] .config-toolbar-title{display:flex;gap:14px;font-size:20px}
+.config-panel[data-active-module="rotation"] .config-toolbar-title>.lucide-icon{width:44px;height:44px;padding:10px;border:1px solid #2a3740;border-radius:7px;color:#55deb0}
+.config-panel[data-active-module="rotation"] .config-scroll{padding:18px 24px 20px}
+.rotation-overview{justify-content:flex-end;gap:7px 18px}
+.rotation-overview span{gap:7px;color:#98a6ae}
+.rotation-overview strong{font-size:13px}
+.rotation-overview small{color:#87949c;font-size:11px;white-space:nowrap}
+.rotation-controls{grid-template-columns:225px minmax(320px,1fr) 150px 84px;gap:16px}
+.rotation-controls label{gap:8px}
+.rotation-controls select,.rotation-controls input,.rotation-controls button{height:46px}
+.rotation-search-field{position:relative;display:block}
+.rotation-search-field>.lucide-icon{position:absolute;z-index:1;top:50%;left:15px;width:17px;height:17px;color:#89969e;transform:translateY(-50%);pointer-events:none}
+.rotation-search-field input{padding-left:44px}
+.rotation-bulk-actions{min-height:70px;margin-top:0;padding:15px 0 12px;border-top:0}
+.rotation-bulk-meta{display:none}
+.rotation-bulk-buttons{margin-left:auto}
+.rotation-bulk-buttons button,.rotation-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.rotation-bulk-buttons .lucide-icon{width:15px;height:15px}
+.rotation-bulk-actions button{height:42px;padding:0 18px;border-radius:6px;background:#0e171c;border-color:#293640;color:#94a1a8}
+.rotation-bulk-actions #rotation-probe-selected:not(:disabled),.rotation-bulk-actions #rotation-probe-all{border-color:#2b715d;color:#55deb0}
+.rotation-bulk-actions #rotation-delete-selected{border-color:#623237;color:#ff7d83}
+.rotation-table-wrap{max-height:390px;margin-top:0;border-radius:6px}
+.rotation-table{min-width:1240px;font-size:12px}
+.rotation-table th{height:52px;padding:0 13px;background:#111920;color:#a7b2b8;font-size:11px}
+.rotation-table td{height:64px;padding:9px 13px}
+.rotation-table th:first-child,.rotation-table td:first-child{width:44px}
+.rotation-table input[type="checkbox"]{appearance:none;width:18px;height:18px;padding:0;border:1px solid #6c7a82;border-radius:4px;background:#10171c;cursor:pointer}
+.rotation-table input[type="checkbox"]:checked{border-color:#55deb0;background:#55deb0;box-shadow:inset 0 0 0 4px #10171c}
+.rotation-status{min-width:48px;padding:5px 9px;border-radius:999px}
+.rotation-actions button{height:34px;padding:0 12px;border-radius:6px}
+.rotation-actions .inline-button{border-color:#2b715d;background:#10211c;color:#55deb0}
+.rotation-actions .danger-button{border-color:#623237;background:#181315;color:#ff7d83}
+.rotation-pagination{justify-content:flex-end;margin-top:18px}
+.rotation-pagination>#rotation-page-summary{margin-right:auto}
+.rotation-pagination button{min-width:74px;height:38px;border-color:#293640;background:#10171d}
+
+.results .section-title .monitor-title-icon-box{display:grid;width:30px;height:30px;padding:0;border:1px solid #2a3740;border-radius:6px;place-items:center;color:#e5ecef}
+.results .section-title .monitor-title-icon{width:16px;height:16px;color:inherit}
+.results .section-title em{margin-left:4px;padding:4px 6px;border-color:#248c95;color:#38d5e8;font-size:10px}
+.results-actions button{display:inline-flex;align-items:center;justify-content:center;gap:7px}
+.results-actions button .lucide-icon{width:13px;height:13px}
+.results-actions #refresh{border-color:#27747c;color:#49d1df}
+.monitor-flow-head{margin-top:12px;padding-top:13px}
+.monitor-flow-head>div{gap:4px}
+.monitor-flow-head>div>span{color:#eef3f5;font-size:13px;font-weight:700}
+.monitor-flow-head small{max-width:300px;font-size:11px}
+.monitor-flow-head>strong{padding:6px 12px;border-radius:999px;font-size:10px}
+.monitor-workflow{display:grid;gap:0;margin-top:8px;padding:4px 7px 4px 0;border:0;border-radius:0;background:#091015}
+.monitor-flow-step{position:relative;display:grid;grid-template-columns:36px minmax(0,1fr);align-items:center;gap:7px;min-height:46px;color:#75828a}
+.monitor-flow-step:not(:last-child)::after{position:absolute;z-index:0;top:33px;bottom:-13px;left:17px;width:1px;background:#34424a;content:""}
+.monitor-flow-number{position:relative;z-index:1;display:grid;width:27px;height:27px;margin-left:4px;border-color:#46545c;background:#0b1217;place-items:center;font-size:10px}
+.monitor-flow-card{display:flex;min-height:39px;align-items:center;justify-content:space-between;gap:10px;padding:0 11px;border:1px solid #27333b;border-radius:5px;background:#0d151a}
+.monitor-flow-card strong{min-width:0;overflow:hidden;color:#87939b;font-size:10px;font-weight:650;text-overflow:ellipsis;white-space:nowrap}
+.monitor-flow-state{display:inline-flex;flex:0 0 auto;align-items:center;gap:6px;color:#76848c;font-size:9px;white-space:nowrap}
+.monitor-flow-state i{width:6px;height:6px;border-radius:50%;background:#68767e}
+.monitor-flow-step.running .monitor-flow-number{border-color:#38cde0;color:#38d5e8}
+.monitor-flow-step.running .monitor-flow-card{border-color:#257f8a}
+.monitor-flow-step.running .monitor-flow-card strong,.monitor-flow-step.running .monitor-flow-state{color:#38d5e8}
+.monitor-flow-step.running .monitor-flow-state i{background:#38d5e8;box-shadow:0 0 8px rgba(56,213,232,.5)}
+.monitor-flow-step.running:not(:last-child)::after{background:#38cde0}
+.monitor-flow-step.done .monitor-flow-number,.monitor-flow-step.skipped .monitor-flow-number{border-color:#3e8f75;color:#55deb0}
+.monitor-flow-step.done .monitor-flow-card strong,.monitor-flow-step.done .monitor-flow-state,.monitor-flow-step.skipped .monitor-flow-card strong,.monitor-flow-step.skipped .monitor-flow-state{color:#55cda8}
+.monitor-flow-step.done .monitor-flow-state i,.monitor-flow-step.skipped .monitor-flow-state i{background:#55deb0}
+.monitor-flow-step.done:not(:last-child)::after,.monitor-flow-step.skipped:not(:last-child)::after{background:#3e8f75}
+.monitor-flow-step.failed .monitor-flow-number{border-color:#a8444b;color:#ff7d83}
+.monitor-flow-step.failed .monitor-flow-card{border-color:#6b3036;background:#171215}
+.monitor-flow-step.failed .monitor-flow-card strong,.monitor-flow-step.failed .monitor-flow-state{color:#ff7d83}
+.monitor-flow-step.failed .monitor-flow-state i{background:#ff7d83}
+
+.manual-import-panel{display:grid;gap:12px;margin-top:20px;padding-top:18px;border-top:1px solid #27333b}
+.manual-import-panel[hidden]{display:none}
+.manual-import-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.manual-import-head>div{display:flex;align-items:baseline;gap:10px}
+.manual-import-head strong{color:#e3eaed;font-size:13px}
+.manual-import-head small{color:#7d8b93;font-size:10px}
+.manual-import-table-wrap{overflow:auto;border:1px solid #28353d;border-radius:6px;background:#091015}
+.manual-import-table{width:100%;min-width:720px;border-collapse:collapse;font-size:11px}
+.manual-import-table th,.manual-import-table td{height:43px;padding:0 12px;border-bottom:1px solid #1e2a31;text-align:left;white-space:nowrap}
+.manual-import-table th{height:36px;color:#75838b;font-size:10px;font-weight:650;background:#0d151a}
+.manual-import-table tbody tr:last-child td{border-bottom:0}
+.manual-import-table td{color:#aeb9bf}.manual-import-table td strong{color:#dce5e9;font-size:11px}
+.manual-format,.manual-probe{display:inline-flex;align-items:center;min-height:23px;padding:0 8px;border:1px solid #40505a;border-radius:4px;color:#aab7bd;font:700 9px/1 ui-monospace,Consolas,monospace}
+.manual-probe.ready{border-color:#39775e;color:#55deb0}.manual-probe.running{border-color:#2e708d;color:#61b9eb}.manual-probe.failed{border-color:#6b3036;color:#ff858b}
+.manual-import-actions{display:flex;justify-content:flex-end;gap:7px}.manual-import-actions button{height:28px;padding:0 9px;font-size:10px}
+.manual-import-empty{height:90px!important;color:#6f7d85!important;text-align:center!important}
+
+@media(max-width:1180px){
+  [data-config-module="registration"] .primary-setting{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .config-panel[data-active-module="rotation"] .config-toolbar{align-items:flex-start;flex-direction:column}
+  .rotation-overview{justify-content:flex-start}
+  .rotation-controls{grid-template-columns:1fr 1fr}
+  .rotation-search{grid-column:2}
+}
+@media(max-width:760px){
+  .config-panel[data-active-module="registration"] .toolbar-format{width:auto;margin-right:0}
+  [data-config-module="registration"] .primary-setting,[data-config-module="registration"]>.grid{grid-template-columns:1fr}
+  .config-panel[data-active-module="rotation"] .config-toolbar-title{display:flex}
+  .rotation-overview{gap:7px 12px}
+  .rotation-overview small{width:auto}
+  .rotation-controls{grid-template-columns:1fr 1fr}
+  .rotation-search{grid-column:1/-1;grid-row:2}
+}
+
+/* Mail account filtering, selection and right-aligned bulk actions. */
+.toolbar-format-label{display:flex;min-height:18px;align-items:center;gap:3px;line-height:1.35;white-space:nowrap}
+.toolbar-format-label strong{color:#dce5e9;font-weight:600}
+.hotmail-list-toolbar{display:flex;align-items:flex-end;justify-content:space-between;gap:14px}
+.hotmail-list-filters{display:grid;min-width:0;grid-template-columns:135px minmax(210px,300px);align-items:end;gap:10px}
+.hotmail-list-filters label{gap:5px}
+.hotmail-list-filters select,.hotmail-list-filters input{height:36px;padding-top:0;padding-bottom:0}
+.hotmail-search-field{position:relative;display:block}
+.hotmail-search-field>.lucide-icon{position:absolute;z-index:1;top:50%;left:11px;width:14px;height:14px;color:#819098;transform:translateY(-50%);pointer-events:none}
+.hotmail-search-field input{padding-left:34px}
+.hotmail-list-toolbar .hotmail-pool-actions{display:flex;flex:0 0 auto;align-items:center;justify-content:flex-end;gap:7px}
+.hotmail-list-toolbar .hotmail-pool-actions button{display:inline-flex;height:36px;align-items:center;justify-content:center;gap:6px;padding:0 11px;font-size:10px}
+.hotmail-list-toolbar .hotmail-pool-actions .lucide-icon{width:13px;height:13px}
+.hotmail-account-table-head,.hotmail-account{grid-template-columns:34px minmax(190px,1.25fr) minmax(90px,.55fr) minmax(100px,.65fr) minmax(130px,.8fr) minmax(150px,.72fr)}
+.hotmail-account-table-head{padding:0 13px}
+.hotmail-account{padding-right:13px;padding-left:13px}
+.hotmail-select{display:grid;place-items:center}
+.hotmail-account-table input[type="checkbox"]{appearance:none;width:16px;height:16px;padding:0;border:1px solid #687780;border-radius:4px;background:#0e161b;cursor:pointer}
+.hotmail-account-table input[type="checkbox"]:checked{border-color:#55deb0;background:#55deb0;box-shadow:inset 0 0 0 4px #0e161b}
+.hotmail-account-table-head>span:first-child{display:grid;place-items:center}
+.hotmail-code{display:flex;min-width:0;flex-direction:column;gap:3px}.hotmail-code strong{overflow:hidden;color:#d8e1e5;font:600 11px/1.2 ui-monospace,Consolas,monospace;text-overflow:ellipsis;white-space:nowrap}.hotmail-code small{overflow:hidden;color:#70818a;font-size:9px;text-overflow:ellipsis;white-space:nowrap}.hotmail-code.waiting strong{color:#61b9eb}.hotmail-code.received strong{color:#55deb0}.hotmail-code.failed strong{color:#ff858b}.hotmail-code.empty-code{color:#63727b;font-size:11px}
+
+@media(max-width:1180px){
+  .hotmail-list-toolbar{align-items:stretch;flex-direction:column}
+  .hotmail-list-toolbar .hotmail-pool-actions{justify-content:flex-end}
+}
+@media(max-width:760px){
+  .hotmail-list-filters{grid-template-columns:1fr}
+  .hotmail-list-toolbar .hotmail-pool-actions{display:grid;grid-template-columns:1fr 1fr}
+  .hotmail-account-table-head,.hotmail-account{min-width:960px}
+}
+
+/* Taller workspace and compact single-line registration format selector. */
+@media(min-width:1181px){
+  .config-panel,.side-column{height:855px;min-height:855px;max-height:855px}
+  .side-column{grid-template-rows:420px minmax(0,1fr)}
+  .hotmail-account-table{max-height:360px}
+}
+.toolbar-format{display:flex;min-width:390px;align-items:center;flex-direction:row;gap:8px}
+.toolbar-format-label{display:block;min-height:0;flex:0 0 auto;line-height:42px}
+.toolbar-format select{min-width:0;flex:1}
+.toolbar-format-label strong{display:none}
+
+/* Buttons share one text color and use border/hover tone only. */
+button,.secondary,.ghost,.inline-button,.pause-current,.danger-button,.reset-round,.path-button,.download-button{
+  border:1px solid #35434d!important;
+  background:transparent!important;
+  color:#d8e1e5!important;
+  box-shadow:none!important;
+}
+button:hover:not(:disabled),.secondary:hover:not(:disabled),.ghost:hover:not(:disabled),.inline-button:hover:not(:disabled){
+  border-color:#60717c!important;
+  background:rgba(129,147,158,.11)!important;
+  color:#f1f5f7!important;
+  filter:none;
+}
+#start,.download-button,#download-accounts,.copy-path,.resume-task,.rotation-actions .inline-button,.hotmail-actions button:not(.danger-button),#probe-hotmail-accounts,#import-hotmail-accounts{
+  border-color:#327861!important;
+}
+#start:hover:not(:disabled),.download-button:hover:not(:disabled),#download-accounts:hover:not(:disabled),.copy-path:hover:not(:disabled),.resume-task:hover:not(:disabled),.rotation-actions .inline-button:hover:not(:disabled),.hotmail-actions button:not(.danger-button):hover:not(:disabled),#probe-hotmail-accounts:hover:not(:disabled),#import-hotmail-accounts:hover:not(:disabled){
+  border-color:#55deb0!important;
+  background:rgba(85,222,176,.12)!important;
+}
+.danger-button,.reset-round,.stop,#rotation-delete-selected,#delete-selected-hotmail-accounts,#delete-used-hotmail-accounts,.hotmail-actions .danger-button{
+  border-color:#6c363b!important;
+}
+.danger-button:hover:not(:disabled),.reset-round:hover:not(:disabled),.stop:hover:not(:disabled),#rotation-delete-selected:hover:not(:disabled),#delete-selected-hotmail-accounts:hover:not(:disabled),#delete-used-hotmail-accounts:hover:not(:disabled),.hotmail-actions .danger-button:hover:not(:disabled){
+  border-color:#b84f58!important;
+  background:rgba(184,79,88,.12)!important;
+}
+.pause-current,.pause-task{
+  border-color:#6a5938!important;
+}
+.pause-current:hover:not(:disabled),.pause-task:hover:not(:disabled){
+  border-color:#b79550!important;
+  background:rgba(183,149,80,.12)!important;
+}
+#refresh,.retry-task{
+  border-color:#2c707a!important;
+}
+#refresh:hover:not(:disabled),.retry-task:hover:not(:disabled){
+  border-color:#45b9c8!important;
+  background:rgba(69,185,200,.12)!important;
+}
+.module-nav-button,.module-nav-button:hover,.paths-close,.log-clear,.hotmail-page-buttons button{
+  background:transparent!important;
+}
+.module-nav-button{border:0!important}
+.hotmail-page-buttons button.active{border-color:#55deb0!important;background:transparent!important;color:#d8e1e5!important}
+button:disabled{background:transparent!important;color:#7b878e!important}
+
+/* Shared confirmation dialog, visually aligned with the reference prompt. */
+.confirm-modal{position:fixed;z-index:140;inset:0;display:grid;place-items:center;padding:24px;background:rgba(3,7,10,.78);backdrop-filter:blur(6px)}
+.confirm-dialog{width:min(650px,100%);overflow:hidden;border:1px solid rgba(255,255,255,.7);border-radius:20px;background:#f7f8f9;color:#151b20;box-shadow:0 32px 110px rgba(0,0,0,.58)}
+.confirm-head{display:flex;align-items:center;gap:18px;margin:0 34px;padding:28px 0 24px;border-bottom:1px solid #dfe3e6}
+.confirm-info{display:grid;width:46px;height:46px;border:10px solid #e7eaed;border-radius:50%;color:#4b535a;place-items:center;font:800 24px/1 Georgia,serif;box-sizing:content-box}
+.confirm-head h2{margin:0;font-size:25px;letter-spacing:0}
+.confirm-body{display:grid;gap:12px;padding:28px 40px 10px}
+.confirm-body strong{font-size:25px;line-height:1.45;font-weight:700}
+.confirm-body p{margin:0;color:#596168;font-size:16px;line-height:1.7}
+.confirm-actions{display:flex;justify-content:flex-end;gap:14px;padding:28px 40px 34px}
+.confirm-actions button{min-width:112px;height:50px;border-radius:10px!important;font-size:17px}
+.confirm-actions #global-confirm-ok{border-color:#121a22!important;background:#121a22!important;color:#fff!important}
+.confirm-actions #global-confirm-ok:hover{background:#202c37!important}
+.confirm-actions #global-confirm-cancel{border-color:#cfd5da!important;background:transparent!important;color:#30383f!important}
+.confirm-actions #global-confirm-cancel:hover{background:#eceff1!important}
+
+/* The concurrency warning uses the same global dialog language. */
+.safety-modal{z-index:139;background:rgba(3,7,10,.78);backdrop-filter:blur(6px)}
+.safety-dialog{width:min(650px,100%);padding:34px 40px;border:1px solid rgba(255,255,255,.7);border-radius:20px;background:#f7f8f9;color:#151b20;box-shadow:0 32px 110px rgba(0,0,0,.58)}
+.safety-icon{border-color:#cfd5da;background:#e7eaed;color:#4b535a}
+.safety-dialog h2{color:#151b20}
+.safety-dialog p{color:#596168}
+.safety-dialog p strong{color:#151b20}
+.safety-performance{border-color:#d8dde1;background:#eef1f3;color:#30383f}
+.safety-performance span{color:#596168}.safety-performance strong{color:#151b20}.safety-performance small{color:#596168}
+.safety-actions button{border-color:#cfd5da!important;background:transparent!important;color:#30383f!important}
+.safety-actions button:hover{background:#e9edef!important}
+.safety-actions #concurrency-warning-remember{border-color:#121a22!important;background:#121a22!important;color:#fff!important}
+
+@media(max-width:760px){
+  .toolbar-format{min-width:0;display:grid;grid-template-columns:auto minmax(0,1fr)}
+  .toolbar-format-label{line-height:40px}
+  .confirm-head{margin:0 22px;padding:22px 0 18px}.confirm-info{width:34px;height:34px;border-width:7px;font-size:18px}.confirm-head h2{font-size:21px}
+  .confirm-body{padding:22px 24px 8px}.confirm-body strong{font-size:20px}.confirm-body p{font-size:14px}
+  .confirm-actions{padding:22px 24px 26px}.confirm-actions button{min-width:96px;height:44px;font-size:15px}
+}
+
+/* Unified button palette: one border, three text tones. */
+button,.secondary,.ghost,.inline-button,.pause-current,.danger-button,.reset-round,.path-button,.download-button,
+#start,#refresh,.retry-task,.pause-task,.resume-task,.stop,.copy-path,#download-accounts,
+.rotation-actions button,.hotmail-actions button,.hotmail-pool-actions button,.rotation-bulk-actions button{
+  border-color:#46545e!important;
+  color:#d8e1e5!important;
+}
+#start,.download-button,#download-accounts,.copy-path,.resume-task,.rotation-actions .inline-button:not(.danger-button),
+.hotmail-actions button:not(.danger-button),#probe-hotmail-accounts,#import-hotmail-accounts,#refresh,.retry-task{
+  color:#55deb0!important;
+}
+.danger-button,.reset-round,.stop,#rotation-delete-selected,#delete-selected-hotmail-accounts,#delete-used-hotmail-accounts,
+.hotmail-actions .danger-button{
+  color:#ff858b!important;
+}
+button:hover:not(:disabled),.secondary:hover:not(:disabled),.ghost:hover:not(:disabled),.inline-button:hover:not(:disabled){
+  border-color:#46545e!important;
+  background:rgba(216,225,229,.09)!important;
+}
+#start:hover:not(:disabled),.download-button:hover:not(:disabled),#download-accounts:hover:not(:disabled),.copy-path:hover:not(:disabled),
+.resume-task:hover:not(:disabled),.rotation-actions .inline-button:not(.danger-button):hover:not(:disabled),
+.hotmail-actions button:not(.danger-button):hover:not(:disabled),#probe-hotmail-accounts:hover:not(:disabled),
+#import-hotmail-accounts:hover:not(:disabled),#refresh:hover:not(:disabled),.retry-task:hover:not(:disabled){
+  border-color:#46545e!important;
+  background:rgba(85,222,176,.12)!important;
+}
+.danger-button:hover:not(:disabled),.reset-round:hover:not(:disabled),.stop:hover:not(:disabled),
+#rotation-delete-selected:hover:not(:disabled),#delete-selected-hotmail-accounts:hover:not(:disabled),
+#delete-used-hotmail-accounts:hover:not(:disabled),.hotmail-actions .danger-button:hover:not(:disabled){
+  border-color:#46545e!important;
+  background:rgba(255,133,139,.12)!important;
+}
+.pause-current:hover:not(:disabled),.pause-task:hover:not(:disabled){
+  border-color:#46545e!important;
+  background:rgba(216,225,229,.09)!important;
+}
+.hotmail-page-buttons button.active{border-color:#46545e!important;color:#55deb0!important}
+.confirm-actions button,.safety-actions button{border-color:#9aa3aa!important}
+.confirm-actions #global-confirm-ok,.safety-actions #concurrency-warning-remember{border-color:#9aa3aa!important}
+.visually-hidden{position:absolute!important;width:1px!important;height:1px!important;padding:0!important;margin:-1px!important;overflow:hidden!important;clip:rect(0,0,0,0)!important;white-space:nowrap!important;border:0!important}
+.hotmail-list-filters label{gap:0}
+.hotmail-account-identity{display:flex;min-height:32px;justify-content:center;flex-direction:column}
+
+/* Keep actions visually quiet: neutral outlines, transparent fills, semantic text only. */
+button,.secondary,.ghost,.inline-button,.pause-current,.danger-button,.reset-round,.path-button,.download-button,
+.rotation-actions button,.hotmail-actions button,.hotmail-pool-actions button,.rotation-bulk-actions button{
+  border-color:#46545e!important;
+  background:transparent!important;
+}
+button:hover:not(:disabled),.secondary:hover:not(:disabled),.ghost:hover:not(:disabled),.inline-button:hover:not(:disabled),
+.pause-current:hover:not(:disabled),.danger-button:hover:not(:disabled),.reset-round:hover:not(:disabled),
+.path-button:hover:not(:disabled),.download-button:hover:not(:disabled){
+  border-color:#46545e!important;
+  background:rgba(216,225,229,.09)!important;
+}
+[data-hotmail-action="delete"],[data-rotation-action="delete"],#delete-selected-hotmail-accounts,
+#delete-used-hotmail-accounts,#rotation-delete-selected,.reset-round,.stop{
+  color:#ff858b!important;
+}
+.hotmail-status,.rotation-status{
+  border:1px solid #46545e!important;
+  background:transparent!important;
+}
+.rotation-actions .inline-button:not(.danger-button),.rotation-actions .inline-button.danger-button,
+.hotmail-actions button:not(.danger-button),.hotmail-actions .danger-button,
+#probe-hotmail-accounts,#import-hotmail-accounts,#delete-selected-hotmail-accounts,#delete-used-hotmail-accounts,
+#rotation-probe-selected,#rotation-probe-all,#rotation-delete-selected,
+#start,#refresh,#download-accounts{
+  border-color:#46545e!important;
+  background:transparent!important;
+}
+.rotation-actions .inline-button.danger-button,.hotmail-actions .danger-button,
+#delete-selected-hotmail-accounts,#delete-used-hotmail-accounts,#rotation-delete-selected{
+  color:#ff858b!important;
+}
+.rotation-actions .inline-button:not(.danger-button):hover:not(:disabled),
+.rotation-actions .inline-button.danger-button:hover:not(:disabled),
+.hotmail-actions button:not(.danger-button):hover:not(:disabled),
+.hotmail-actions .danger-button:hover:not(:disabled),
+#probe-hotmail-accounts:hover:not(:disabled),#import-hotmail-accounts:hover:not(:disabled),
+#delete-selected-hotmail-accounts:hover:not(:disabled),#delete-used-hotmail-accounts:hover:not(:disabled),
+#rotation-probe-selected:hover:not(:disabled),#rotation-probe-all:hover:not(:disabled),
+#rotation-delete-selected:hover:not(:disabled),#start:hover:not(:disabled),#refresh:hover:not(:disabled),
+#download-accounts:hover:not(:disabled){
+  border-color:#46545e!important;
+  background:rgba(216,225,229,.09)!important;
+}
+
+/* Bordered product heading with the utility actions aligned to the title row. */
+header{display:grid;min-height:142px;grid-template-columns:minmax(620px,900px) minmax(390px,1fr);align-items:start;gap:30px;padding:20px 32px 18px;border:1px solid #29363e;border-radius:8px;background:#0d161b}
+.title-card{position:relative;min-width:0}
+.title-card::after{position:absolute;top:-2px;right:22px;width:82px;height:104px;background-image:radial-gradient(circle,#1d4d45 1px,transparent 1.5px);background-size:9px 9px;content:"";opacity:.55;pointer-events:none}
+.title-card .eyebrow{position:relative;z-index:1;margin:0 0 7px;font-size:11px;letter-spacing:.08em}
+.title-card h1{position:relative;z-index:1;font-size:42px;line-height:1.12}
+.title-meta{position:relative;z-index:1;display:flex;align-items:center;gap:11px;margin-top:12px;color:#9daab1;font-size:12px}
+.title-meta .lucide-icon{width:17px;height:17px;color:#55deb0}
+.title-meta i{color:#52616a;font-style:normal}
+.header-side{align-self:start;display:flex;flex-direction:column;gap:11px;margin-top:24px}
+.header-actions{margin-top:0}
+.registration-stats{display:grid;grid-template-columns:repeat(5,minmax(50px,1fr)) minmax(112px,1.8fr);padding-top:10px;border-top:1px solid #29363e}
+.registration-stats span{display:flex;min-width:0;align-items:center;justify-content:center;gap:4px;padding:0 5px;text-align:center;border-left:1px solid #29363e}
+.registration-stats span:first-child{border-left:0}
+.registration-stats small,.registration-stats strong{display:inline;white-space:nowrap}
+.registration-stats small{color:#7f9099;font-size:11px;font-weight:600}
+.registration-stats strong{margin-top:0;color:#d8e0e4;font-size:11px}
+.registration-stats span:nth-child(1) strong,.registration-stats span:nth-child(4) strong{color:#65dfb7}
+.registration-stats span:nth-child(2) strong{color:#ff858b}
+
+@media(max-width:1180px){
+  header{grid-template-columns:minmax(0,1fr);gap:14px}
+  .header-side{margin-top:0}
+  .header-actions{justify-content:flex-start}
+}
+@media(max-width:760px){
+  .title-card h1{font-size:32px}
+  .title-card::after{right:10px;opacity:.35}
+  .title-meta{flex-wrap:wrap;gap:7px 9px;margin-top:10px}
+  .registration-stats{grid-template-columns:repeat(3,1fr);row-gap:10px}
+  .registration-stats span:nth-child(4){border-left:0}
+}
+@media(max-width:480px){.registration-stats{grid-template-columns:repeat(2,1fr)}.registration-stats span:nth-child(3),.registration-stats span:nth-child(5){border-left:0}}
+
+/* Compact dialogs keep the surrounding workspace visible. */
+.confirm-modal,.safety-modal{padding:18px;background:rgba(3,7,10,.28);backdrop-filter:none}
+.confirm-dialog{width:min(470px,100%);border-radius:10px;box-shadow:0 18px 54px rgba(0,0,0,.42)}
+.confirm-head{gap:12px;margin:0 24px;padding:18px 0 14px}
+.confirm-info{width:30px;height:30px;border-width:6px;font-size:17px}
+.confirm-head h2{font-size:18px}
+.confirm-body{gap:8px;padding:18px 26px 4px}
+.confirm-body strong{font-size:18px;line-height:1.4}
+.confirm-body p{font-size:13px;line-height:1.55}
+.confirm-actions{gap:9px;padding:18px 26px 22px}
+.confirm-actions button{min-width:86px;height:38px;border-radius:7px!important;font-size:13px}
+.safety-dialog{width:min(470px,100%);padding:24px 26px;border-radius:10px;box-shadow:0 18px 54px rgba(0,0,0,.42)}
+
+/* Dialogs use the same dark surface and compact heading rhythm as the workspace. */
+.confirm-dialog,.safety-dialog{border-color:#34414b;background:#0d1419;color:#edf2f5}
+.confirm-head{gap:10px;margin:0 22px;padding:11px 0 9px;border-color:#27323a}
+.confirm-info{width:26px;height:26px;border:4px solid #26323a;background:#111a20;color:#9eabb2;font-size:14px}
+.confirm-head h2{color:#edf2f5;font-size:16px}
+.confirm-body{gap:6px;padding:14px 24px 2px}
+.confirm-body strong{color:#edf2f5;font-size:16px}
+.confirm-body p{color:#89969e;font-size:12px}
+.confirm-actions{gap:8px;padding:14px 24px 18px}
+.confirm-actions button{display:inline-flex;min-width:80px;height:34px;align-items:center;justify-content:center;padding:0;font-size:12px;line-height:1}
+.confirm-actions #global-confirm-ok{border-color:#46545e!important;background:transparent!important;color:#55deb0!important}
+.confirm-actions #global-confirm-ok:hover{background:rgba(85,222,176,.1)!important}
+.confirm-actions #global-confirm-cancel{border-color:#46545e!important;background:transparent!important;color:#d8e1e5!important}
+.confirm-actions #global-confirm-cancel:hover{background:rgba(216,225,229,.09)!important}
+.safety-dialog h2,.safety-dialog p,.safety-dialog p strong{color:#edf2f5}
+.safety-dialog p{color:#89969e}
+.safety-icon{border-color:#34414b;background:#111a20;color:#9eabb2}
+.safety-performance{border-color:#2b3741;background:#091015;color:#d8e1e5}
+.safety-performance span,.safety-performance small{color:#89969e}.safety-performance strong{color:#edf2f5}
+.safety-actions button,.safety-actions #concurrency-warning-remember{display:inline-flex;align-items:center;justify-content:center;border-color:#46545e!important;background:transparent!important;color:#d8e1e5!important;line-height:1}

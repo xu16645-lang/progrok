@@ -164,6 +164,8 @@ def _download_chatgpt_records(ctx, batch_id=None):
 
 
 def download_accounts(ctx, export_format=None, batch_id=None):
+    if export_format == "chatgpt_auth_json":
+        raise ctx.HTTPException(status_code=400, detail="ChatGPT 相关下载暂时停用")
     records = (
         ctx._download_chatgpt_records(batch_id)
         if export_format == "chatgpt_auth_json"

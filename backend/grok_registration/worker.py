@@ -37,6 +37,13 @@ def _run_registration(
         0, min(30_000, int(pipeline_cfg.get("step_delay_ms") or 0))
     )
     hotmail_account_id = str(sess.get("_hotmail_account_id") or "")
+    hotmail_alias_index = sess.get("_hotmail_alias_index")
+    try:
+        hotmail_alias_index = (
+            int(hotmail_alias_index) if hotmail_alias_index is not None else None
+        )
+    except (TypeError, ValueError):
+        hotmail_alias_index = None
     hotmail_marked_used = False
     browser_session = None
 
@@ -117,88 +124,28 @@ def _run_registration(
             "xAI 浏览器注册成功，已保存原始浏览器 Session",
             sso=sso,
             session_file=str(session_file),
+            registration_succeeded_at=ctx._now(),
         )
 
         if hotmail_account_id and not hotmail_marked_used:
             from hotmail_local import mark_used
 
-            hotmail_marked_used = mark_used(hotmail_account_id)
+            hotmail_marked_used = mark_used(
+                hotmail_account_id, alias_index=hotmail_alias_index
+            )
 
         output_target = str(
             pipeline_cfg.get("output_format")
             or pipeline_cfg.get("target")
             or "cpa"
         ).strip().lower()
-        direct_sub2_oauth = bool(pipeline_cfg.get("auto_import_enabled")) and (
-            output_target == "sub2api"
+        output_target = output_target if output_target in {"cpa", "sub2api"} else "cpa"
+        output_format_label = "CPA JSON" if output_target == "cpa" else "Sub2API JSON"
+        update(
+            "importing",
+            f"正在浏览器中完成 xAI OAuth 设备授权，随后转换 {output_format_label}",
+            registration_json_format=output_target,
         )
-        if direct_sub2_oauth:
-            update("importing", "正在向 Sub2API 请求 Grok OAuth 授权链接")
-            from account_pipeline import create_grok_oauth_in_sub2api
-
-            direct_result = create_grok_oauth_in_sub2api(
-                authorize=browser_session.authorize_sub2_oauth,
-                email=email,
-                base_url=str(pipeline_cfg.get("sub2api_base_url") or ""),
-                api_key=str(pipeline_cfg.get("sub2api_api_key") or ""),
-                auth_mode=str(pipeline_cfg.get("sub2api_auth_mode") or "password"),
-                admin_email=str(pipeline_cfg.get("sub2api_admin_email") or ""),
-                admin_password=str(pipeline_cfg.get("sub2api_admin_password") or ""),
-                group_id=int(pipeline_cfg.get("sub2api_xai_group_id") or 0),
-            )
-            if not direct_result.get("ok"):
-                raise RuntimeError(
-                    f"Sub2API Grok OAuth 直接导入失败：{direct_result.get('error') or '未知错误'}；"
-                    "原始 Session 已保留"
-                )
-            external_account_id = str(direct_result.get("account_id") or "")
-            auto_import = {
-                "enabled": True,
-                "target": "sub2api",
-                "ok": True,
-                "skipped": False,
-                "count": 1,
-                "imported": 1,
-                "failed": 0,
-                "group_id": direct_result.get("group_id"),
-                "path": "grok_oauth_callback",
-            }
-            update(
-                "imported",
-                "Sub2API OAuth 授权码已回填，账号已直接导入并绑定分组",
-                auto_import=auto_import,
-                imported_account_ids=[],
-                imported_accounts=[
-                    {
-                        "id": external_account_id,
-                        "email": direct_result.get("email") or email,
-                        "site": "sub2api",
-                    }
-                ],
-                oauth={
-                    "path": "sub2api_login_callback",
-                    "email": email,
-                    "account_id": external_account_id,
-                },
-                pipeline_queue={
-                    "phase": "done",
-                    "position": 0,
-                    "concurrency": int(
-                        pipeline_cfg.get("pipeline_concurrency") or 1
-                    ),
-                },
-            )
-            try:
-                from account_rotation import record_imported_session
-
-                with ctx._lock:
-                    imported_session = dict(ctx._sessions.get(sid) or sess)
-                record_imported_session("xai", imported_session)
-            except Exception:
-                pass
-            return
-
-        update("importing", "正在浏览器中完成 xAI OAuth 设备授权")
         import sso_to_auth_json as sso_import
 
         conversion_failure: dict[str, Any] = {}
@@ -208,7 +155,11 @@ def _run_registration(
             failure=conversion_failure,
             should_cancel=_check_cancel,
         )
-        if not token or not token.get("access_token"):
+        if (
+            not token
+            or not str(token.get("access_token") or "").strip()
+            or not str(token.get("refresh_token") or "").strip()
+        ):
             stage_labels = {
                 "device_code": "设备码申请",
                 "verify": "设备授权验证",
@@ -255,6 +206,11 @@ def _run_registration(
         import accounts
 
         output_format = "sub2api" if output_target == "sub2api" else "cpa"
+        update(
+            "converting",
+            f"正在转换 {output_format_label}",
+            registration_json_format=output_format,
+        )
         import_result = accounts.import_auth_payload(
             auth_payload,
             merge=True,
@@ -286,15 +242,40 @@ def _run_registration(
                 "refresh_token": bool(token.get("refresh_token")),
                 "email": email,
             }
+            current["registration_json_format"] = output_format
             current["updated_at"] = ctx._now()
             ctx._sessions[sid] = current
             ctx._mirror_reg_sess(sid, current)
-        update("importing", "xAI auth 转换完成，已写入本地账户池")
-        if bool(pipeline_cfg.get("auto_import_enabled")):
-            ctx._enqueue_pipeline_phase(sid, "import")
-        else:
+        update(
+            "converted",
+            f"{output_format_label} 转换完成，已写入本地账户池",
+            registration_json_format=output_format,
+        )
+        auto_import_enabled = bool(pipeline_cfg.get("auto_import_enabled"))
+        pre_import_probe_enabled = bool(
+            pipeline_cfg.get("pre_import_probe_enabled", True)
+        )
+        if not auto_import_enabled:
             ctx._finish_pipeline_without_import(sid, pipeline_cfg)
-        ctx._enqueue_pipeline_phase(sid, "probe")
+        elif pre_import_probe_enabled:
+            with ctx._lock:
+                current = ctx._sessions.get(sid) or sess
+                current["auto_import"] = {
+                    "enabled": True,
+                    "target": output_target,
+                    "ok": None,
+                    "skipped": False,
+                    "queued": False,
+                    "waiting_for_probe": True,
+                }
+                current["updated_at"] = ctx._now()
+                ctx._sessions[sid] = current
+                ctx._mirror_reg_sess(sid, current)
+
+        if pre_import_probe_enabled:
+            ctx._enqueue_pipeline_phase(sid, "probe")
+        elif auto_import_enabled:
+            ctx._enqueue_pipeline_phase(sid, "import")
         return
     except ctx._RegPaused as exc:
         with ctx._lock:
@@ -325,7 +306,13 @@ def _run_registration(
             _check_cancel()
             if browser_session is not None:
                 browser_session.hold_failure()
-            update("error", f"xAI 浏览器注册失败：{exc}", error=str(exc))
+            error_detail = str(exc).strip()
+            error_summary = (error_detail.splitlines()[0] if error_detail else type(exc).__name__)[:500]
+            update(
+                "error",
+                f"xAI 浏览器注册失败：{error_summary}",
+                error=error_detail,
+            )
         except ctx._RegPaused as paused_exc:
             with ctx._lock:
                 cur = ctx._sessions.get(sid) or sess
@@ -360,7 +347,9 @@ def _run_registration(
                 if final_status in {"cancelled", "stopped", "stopping", "paused"}:
                     from hotmail_local import release_account
 
-                    release_account(hotmail_account_id)
+                    release_account(
+                        hotmail_account_id, alias_index=hotmail_alias_index
+                    )
                 else:
                     from hotmail_local import mark_failed
 
@@ -371,6 +360,7 @@ def _run_registration(
                             or final_sess.get("message")
                             or "xAI 浏览器注册失败"
                         ),
+                        alias_index=hotmail_alias_index,
                     )
             except Exception:
                 pass

@@ -219,12 +219,40 @@ def to_iso_string(ctx: MailboxContext, timestamp_ms):
     )
 
 
+def _collect_header_addresses(ctx: MailboxContext, parsed, *headers: str) -> list[str]:
+    addresses: list[str] = []
+    seen: set[str] = set()
+    for header in headers:
+        values = parsed.get_all(header, []) if hasattr(parsed, "get_all") else [parsed.get(header, "")]
+        for raw in values or []:
+            text = ctx.decode_mime_header(str(raw or ""))
+            # A single header may contain multiple comma-separated addresses.
+            for part in str(text or "").replace(";", ",").split(","):
+                _name, addr = ctx.parseaddr(part)
+                value = str(addr or part or "").strip().lower()
+                if not value or "@" not in value or value in seen:
+                    continue
+                seen.add(value)
+                addresses.append(value)
+    return addresses
+
+
 def normalize_message(ctx: MailboxContext, message_id, raw_bytes, mailbox):
     parsed = ctx.email.message_from_bytes(raw_bytes)
     sender_name, sender_addr = ctx.parseaddr(parsed.get("From", ""))
     subject = ctx.decode_mime_header(parsed.get("Subject", ""))
     body = ctx.extract_text_part(parsed)
     timestamp_ms = ctx.to_timestamp_ms(parsed.get("Date"))
+    recipients = _collect_header_addresses(
+        ctx,
+        parsed,
+        "To",
+        "Delivered-To",
+        "X-Original-To",
+        "X-Forwarded-To",
+        "Cc",
+        "Envelope-To",
+    )
     return {
         "id": str(message_id),
         "mailbox": mailbox,
@@ -235,6 +263,10 @@ def normalize_message(ctx: MailboxContext, message_id, raw_bytes, mailbox):
                 "name": sender_name.strip(),
             }
         },
+        "toRecipients": [
+            {"emailAddress": {"address": address}} for address in recipients
+        ],
+        "recipients": recipients,
         "bodyPreview": body[:500],
         "body": {"content": body},
         "receivedDateTime": ctx.to_iso_string(timestamp_ms),
@@ -310,10 +342,30 @@ def fetch_messages_for_mailboxes(
     return {"mailboxResults": mailbox_results, "messages": all_messages}
 
 
+def _graph_recipient_addresses(message: dict) -> list[str]:
+    addresses: list[str] = []
+    seen: set[str] = set()
+    for key in ("toRecipients", "ccRecipients", "bccRecipients"):
+        rows = message.get(key) or []
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            email_addr = row.get("emailAddress") if isinstance(row.get("emailAddress"), dict) else {}
+            value = str(email_addr.get("address") or "").strip().lower()
+            if not value or "@" not in value or value in seen:
+                continue
+            seen.add(value)
+            addresses.append(value)
+    return addresses
+
+
 def normalize_graph_message(ctx: MailboxContext, message, mailbox):
     sender = message.get("from", {}) or {}
     email_addr = sender.get("emailAddress", {}) if isinstance(sender, dict) else {}
     received = str(message.get("receivedDateTime") or "").strip()
+    recipients = _graph_recipient_addresses(message if isinstance(message, dict) else {})
     return {
         "id": str(message.get("id") or message.get("internetMessageId") or "").strip(),
         "mailbox": mailbox,
@@ -324,6 +376,10 @@ def normalize_graph_message(ctx: MailboxContext, message, mailbox):
                 "name": str(email_addr.get("name") or "").strip(),
             }
         },
+        "toRecipients": [
+            {"emailAddress": {"address": address}} for address in recipients
+        ],
+        "recipients": recipients,
         "bodyPreview": str(message.get("bodyPreview") or "").strip(),
         "receivedDateTime": received,
         "receivedTimestamp": int(
@@ -335,6 +391,38 @@ def normalize_graph_message(ctx: MailboxContext, message, mailbox):
     }
 
 
+def _outlook_recipient_addresses(message: dict) -> list[str]:
+    addresses: list[str] = []
+    seen: set[str] = set()
+    for key in (
+        "ToRecipients",
+        "toRecipients",
+        "CcRecipients",
+        "ccRecipients",
+        "BccRecipients",
+        "bccRecipients",
+    ):
+        rows = message.get(key) or []
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            email_addr = {}
+            if isinstance(row.get("EmailAddress"), dict):
+                email_addr = row["EmailAddress"]
+            elif isinstance(row.get("emailAddress"), dict):
+                email_addr = row["emailAddress"]
+            value = str(
+                email_addr.get("Address") or email_addr.get("address") or ""
+            ).strip().lower()
+            if not value or "@" not in value or value in seen:
+                continue
+            seen.add(value)
+            addresses.append(value)
+    return addresses
+
+
 def normalize_outlook_message(ctx: MailboxContext, message, mailbox):
     sender = message.get("From", {}) or message.get("from", {}) or {}
     email_addr = sender.get("EmailAddress", {}) if isinstance(sender, dict) else {}
@@ -343,6 +431,7 @@ def normalize_outlook_message(ctx: MailboxContext, message, mailbox):
     received = str(
         message.get("ReceivedDateTime") or message.get("receivedDateTime") or ""
     ).strip()
+    recipients = _outlook_recipient_addresses(message if isinstance(message, dict) else {})
     return {
         "id": str(message.get("Id") or message.get("id") or "").strip(),
         "mailbox": mailbox,
@@ -357,6 +446,10 @@ def normalize_outlook_message(ctx: MailboxContext, message, mailbox):
                 ).strip(),
             }
         },
+        "toRecipients": [
+            {"emailAddress": {"address": address}} for address in recipients
+        ],
+        "recipients": recipients,
         "bodyPreview": str(
             message.get("BodyPreview") or message.get("bodyPreview") or ""
         ).strip(),
@@ -377,7 +470,7 @@ def fetch_graph_messages(
     query = ctx.urlencode(
         {
             "$top": max(1, min(int(top or ctx.FETCH_LIMIT_DEFAULT), 30)),
-            "$select": "id,internetMessageId,subject,from,bodyPreview,receivedDateTime",
+            "$select": "id,internetMessageId,subject,from,toRecipients,ccRecipients,bodyPreview,receivedDateTime",
             "$orderby": "receivedDateTime desc",
         }
     )
@@ -413,7 +506,7 @@ def fetch_outlook_api_messages(
     query = ctx.urlencode(
         {
             "$top": max(1, min(int(top or ctx.FETCH_LIMIT_DEFAULT), 30)),
-            "$select": "Id,Subject,From,BodyPreview,ReceivedDateTime",
+            "$select": "Id,Subject,From,ToRecipients,CcRecipients,BodyPreview,ReceivedDateTime",
             "$orderby": "ReceivedDateTime desc",
         }
     )
@@ -586,6 +679,31 @@ def extract_code(ctx: MailboxContext, text, code_patterns=None):
     return ""
 
 
+def _message_recipient_addresses(message: dict) -> list[str]:
+    addresses: list[str] = []
+    seen: set[str] = set()
+    raw_list = message.get("recipients")
+    if isinstance(raw_list, list):
+        for value in raw_list:
+            addr = str(value or "").strip().lower()
+            if addr and "@" in addr and addr not in seen:
+                seen.add(addr)
+                addresses.append(addr)
+    for key in ("toRecipients", "ccRecipients"):
+        rows = message.get(key) or []
+        if not isinstance(rows, list):
+            continue
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            email_addr = row.get("emailAddress") if isinstance(row.get("emailAddress"), dict) else {}
+            addr = str(email_addr.get("address") or "").strip().lower()
+            if addr and "@" in addr and addr not in seen:
+                seen.add(addr)
+                addresses.append(addr)
+    return addresses
+
+
 def select_latest_code(
     ctx: MailboxContext,
     messages,
@@ -596,6 +714,7 @@ def select_latest_code(
     required_keywords=None,
     code_patterns=None,
     allow_time_fallback=True,
+    recipient_filters=None,
 ):
     sender_keywords = [
         str(item).strip().lower() for item in sender_filters or [] if str(item).strip()
@@ -608,6 +727,11 @@ def select_latest_code(
         for item in required_keywords or []
         if str(item).strip()
     ]
+    recipient_targets = [
+        str(item).strip().lower()
+        for item in recipient_filters or []
+        if str(item).strip() and "@" in str(item)
+    ]
     excluded = {str(item).strip() for item in exclude_codes or [] if str(item).strip()}
 
     def match_message(message, apply_time_filter):
@@ -619,6 +743,12 @@ def select_latest_code(
             and (timestamp < int(filter_after_timestamp))
         ):
             return None
+        if recipient_targets:
+            recipients = _message_recipient_addresses(message if isinstance(message, dict) else {})
+            # Fail closed: without recipient metadata we cannot prove the code
+            # belongs to this registration alias, so reject the candidate.
+            if not recipients or not any(target in recipients for target in recipient_targets):
+                return None
         sender = str(
             message.get("from", {}).get("emailAddress", {}).get("address", "")
         ).lower()

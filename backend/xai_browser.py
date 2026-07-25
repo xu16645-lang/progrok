@@ -11,8 +11,29 @@ from urllib.parse import parse_qs, urlparse
 XAI_SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
 XAI_GROK_URL = "https://grok.com/"
 TURNSTILE_WAIT_SEC = 90.0
+TURNSTILE_CLICK_COOLDOWN_SEC = 2.0
+TURNSTILE_MAX_CLICK_ATTEMPTS = 3
+TURNSTILE_CLICK_EFFECT_WAIT_MS = 400
+# Password/profile pages often mount Turnstile a few hundred ms after inputs fill.
+TURNSTILE_MOUNT_GRACE_SEC = 4.0
 PAGE_SETTLE_DELAY_MS = 600
 REGISTRATION_LANDING_TIMEOUT_SEC = 60.0
+SIGNUP_FORM_TIMEOUT_SEC = 15.0
+SIGNUP_SUBMIT_TIMEOUT_SEC = 35.0
+SIGNUP_SUBMIT_RETRY_SEC = 4.0
+SIGNUP_SUBMIT_MAX_ATTEMPTS = 3
+SIGNUP_TRANSITION_STABLE_POLLS = 3
+
+# Firefox otherwise deprioritizes fully covered windows on Windows. During a
+# visible concurrent batch that can delay React/Turnstile timers until the user
+# brings each browser window to the foreground.
+VISIBLE_BACKGROUND_PREFS = {
+    "widget.windows.window_occlusion_tracking.enabled": False,
+    "dom.timeout.enable_budget_timer_throttling": False,
+    "dom.min_background_timeout_value": 10,
+    "media.suspend-bkgnd-video.enabled": False,
+    "browser.tabs.unloadOnLowMemory": False,
+}
 
 _FIRST_NAMES = (
     "Aiden",
@@ -115,6 +136,7 @@ class XaiBrowserRuntime:
             options: dict[str, Any] = {"headless": headless}
             if not headless:
                 options["window"] = (width, height)
+                options["firefox_user_prefs"] = dict(VISIBLE_BACKGROUND_PREFS)
             if proxy and proxy.get("server"):
                 options["proxy"] = proxy
             self.camoufox_manager = Camoufox(**options)
@@ -247,35 +269,39 @@ class XaiVisibleRegistration:
         except Exception:
             pass
 
+    def _open_private_context(self) -> None:
+        self._progress("init", "starting")
+        browser, self.using_camoufox, reused = self.runtime.ensure(
+            headless=self.headless,
+            proxy=self.proxy,
+            on_launched=lambda state: self._progress("init", state),
+        )
+        if reused:
+            self._progress("init", "reused_browser")
+        context_kwargs: dict[str, Any]
+        if self.using_camoufox:
+            context_kwargs = {"no_viewport": True}
+        else:
+            context_kwargs = {
+                "viewport": {
+                    "width": 760 if not self.headless else 1280,
+                    "height": 480 if not self.headless else 800,
+                },
+                "locale": "en-US",
+                "timezone_id": "America/New_York",
+            }
+            if self.proxy and self.proxy.get("server"):
+                context_kwargs["proxy"] = self.proxy
+        self.context = browser.new_context(**context_kwargs)
+        self._progress("init", "private_context_created")
+        self.page = self.context.new_page()
+        self._enforce_visible_window()
+
     def open(self) -> None:
         """Open the real signup page in a clean private context."""
         try:
-            self._progress("init", "starting")
-            browser, self.using_camoufox, reused = self.runtime.ensure(
-                headless=self.headless,
-                proxy=self.proxy,
-                on_launched=lambda state: self._progress("init", state),
-            )
-            if reused:
-                self._progress("init", "reused_browser")
-            context_kwargs: dict[str, Any]
-            if self.using_camoufox:
-                context_kwargs = {"no_viewport": True}
-            else:
-                context_kwargs = {
-                    "viewport": {
-                        "width": 760 if not self.headless else 1280,
-                        "height": 480 if not self.headless else 800,
-                    },
-                    "locale": "en-US",
-                    "timezone_id": "America/New_York",
-                }
-                if self.proxy and self.proxy.get("server"):
-                    context_kwargs["proxy"] = self.proxy
-            self.context = browser.new_context(**context_kwargs)
-            self._progress("init", "private_context_created")
-            self.page = self.context.new_page()
-            self._enforce_visible_window()
+            self._open_private_context()
+            assert self.page is not None
             self._progress("navigate", "loading")
             self._action_delay()
             self.page.goto(XAI_SIGNUP_URL, wait_until="domcontentloaded", timeout=45_000)
@@ -288,6 +314,139 @@ class XaiVisibleRegistration:
         except Exception as exc:
             self.close()
             raise XaiBrowserError(f"xAI 浏览器启动失败：{exc}") from exc
+
+    def _login_for_authorization(self, email: str, password: str) -> None:
+        """Create a real browser login session before starting Device Flow."""
+        if self.page is None:
+            raise XaiBrowserError("xAI 授权浏览器未启动")
+        self._progress("session", "full_login_starting")
+        self.page.goto(
+            "https://accounts.x.ai/sign-in?redirect=grok-com",
+            wait_until="domcontentloaded",
+            timeout=45_000,
+        )
+        submitted_forms: set[str] = set()
+        email_method_selected = False
+        deadline = min(self.deadline, time.time() + 120.0)
+        while time.time() < deadline:
+            self._check_cancel()
+            current_url = str(self.page.url or "")
+            sso, _cookies = self._extract_sso()
+            if sso and not re.search(r"/sign-in(?:[/?#]|$)", current_url, re.I):
+                self._progress("session", "full_login_complete")
+                return
+
+            text = self._page_text()
+            if re.search(
+                r"invalid credentials|incorrect (?:email|password)|email or password.*incorrect|"
+                r"邮箱或密码.*(?:错误|不正确)",
+                text,
+                re.I,
+            ):
+                raise XaiBrowserError("xAI 浏览器完整登录失败：邮箱或密码不正确")
+            self._raise_page_error(email)
+
+            email_input = self._first_visible(
+                [
+                    'input[type="email"]',
+                    'input[name="email"]',
+                    'input[autocomplete="email"]',
+                    'input[placeholder*="email" i]',
+                ]
+            )
+            password_input = self._first_visible(
+                [
+                    'input[type="password"]',
+                    'input[name*="password" i]',
+                    'input[autocomplete="current-password"]',
+                ]
+            )
+            if email_input is None and password_input is None:
+                if not email_method_selected and re.search(
+                    r"sign in with email|log\s*in with email|login with email|"
+                    r"使用邮箱.*登录|邮箱登录",
+                    text,
+                    re.I,
+                ):
+                    if self._click_action(
+                        r"^sign in with email$|^log\s*in with email$|^login with email$|"
+                        r"使用邮箱.*登录|邮箱登录"
+                    ):
+                        email_method_selected = True
+                        self._progress("session", "email_login_selected")
+                        self._settle_page()
+                        continue
+                self._wait(250)
+                continue
+
+            form_key = (
+                ("email" if email_input is not None else "")
+                + "+"
+                + ("password" if password_input is not None else "")
+            )
+            if form_key in submitted_forms:
+                self._wait(250)
+                continue
+
+            anchor = password_input or email_input
+            self._action_delay()
+            if self._input_is_editable(email_input):
+                email_input.fill(email)
+                self._progress("session", "login_email_filled")
+            elif email_input is not None:
+                self._progress("session", "login_email_confirmed_readonly")
+            if password_input is not None:
+                password_input.fill(password)
+                self._progress("session", "login_password_filled")
+                self._wait_for_turnstile()
+            self._submit(
+                anchor,
+                "sign in|log\\s*in|login|continue|next|submit|登录|继续|下一步",
+            )
+            submitted_forms.add(form_key)
+            self._progress("session", "login_form_submitted", form=form_key)
+            self._settle_page()
+        raise XaiBrowserError("xAI 浏览器完整登录超时，未进入 Grok 登录成功页")
+
+    def open_authorization(
+        self,
+        cookies: dict[str, str],
+        *,
+        email: str = "",
+        password: str = "",
+        force_full_login: bool = False,
+    ) -> None:
+        """Open a private context with protocol cookies ready for Device Allow."""
+        try:
+            self._open_private_context()
+            if force_full_login:
+                if not email or not password:
+                    raise XaiBrowserError("浏览器完整登录缺少邮箱或密码")
+                self._login_for_authorization(email, password)
+            else:
+                self.sync_cookies(cookies, authenticated=True)
+            assert self.page is not None
+            # Browser registration reaches an authenticated Grok landing page
+            # before Device Flow starts. Reproduce that browser state after
+            # restoring a protocol session instead of navigating straight from
+            # an empty context to the device form.
+            if not force_full_login:
+                self.page.goto(
+                    XAI_GROK_URL, wait_until="domcontentloaded", timeout=45_000
+                )
+                self._wait(1_000)
+            landing_url = str(self.page.url or "")
+            if re.search(r"/(?:sign-in|sign-up)(?:[/?#]|$)", landing_url, re.I):
+                raise XaiBrowserError("协议登录会话未被授权浏览器接受，无法进入 Grok 登录页")
+            self._raise_page_error("")
+            self._progress("session", "authenticated_landing_ready")
+            self._progress("session", "authorization_ready")
+        except (XaiBrowserCancelled, XaiBrowserError):
+            self.close()
+            raise
+        except Exception as exc:
+            self.close()
+            raise XaiBrowserError(f"xAI 授权浏览器启动失败：{exc}") from exc
 
     def sync_cookies(
         self, cookies: dict[str, str] | None, *, authenticated: bool = False
@@ -331,6 +490,15 @@ class XaiVisibleRegistration:
         target.fill(value, timeout=2_000)
         return target
 
+    @staticmethod
+    def _input_is_editable(target: Any | None) -> bool:
+        if target is None:
+            return False
+        try:
+            return bool(target.is_editable(timeout=500))
+        except Exception:
+            return False
+
     def _page_text(self) -> str:
         if self.page is None:
             return ""
@@ -362,12 +530,49 @@ class XaiVisibleRegistration:
             pass
         return None
 
+    def _device_action_busy(self) -> bool:
+        """Return True while the Device Flow page is processing a submitted action."""
+        if self.page is None:
+            return False
+        for selector in (
+            '[aria-busy="true"]',
+            '[role="progressbar"]',
+            'button:disabled',
+            'button[aria-disabled="true"]',
+        ):
+            try:
+                locator = self.page.locator(selector)
+                for index in range(min(10, int(locator.count()))):
+                    if locator.nth(index).is_visible():
+                        return True
+            except Exception:
+                continue
+        return False
+
     def _click_action(self, pattern: str) -> bool:
         candidate = self._find_action(pattern)
         if candidate is None:
             return False
-        candidate.click(timeout=3_000)
-        return True
+        # xAI re-renders buttons while Locator.click performs its stability and
+        # navigation checks. A trusted mouse click at the resolved center avoids
+        # treating that successful transition as a Playwright timeout.
+        return self._click_locator_center(candidate, timeout=3_000)
+
+    def _wait_for_email_signup_form(self) -> bool:
+        """Confirm the email form rendered after choosing email signup."""
+        deadline = min(self.deadline, time.time() + SIGNUP_FORM_TIMEOUT_SEC)
+        selectors = [
+            'input[type="email"]',
+            'input[name="email"]',
+            'input[autocomplete="email"]',
+            'input[placeholder*="email" i]',
+        ]
+        while time.time() < deadline:
+            self._check_cancel()
+            if self._first_visible(selectors) is not None:
+                return True
+            self._wait(200)
+        return False
 
     def _submit(self, anchor: Any | None, pattern: str) -> None:
         self._action_delay()
@@ -379,6 +584,17 @@ class XaiVisibleRegistration:
 
     def _verification_target(self) -> tuple[str, Any] | None:
         if self.page is None:
+            return None
+        # The profile page contains password-related inputs whose generated
+        # names can include "code". It is not the email-code page until the
+        # visible password field has disappeared.
+        if self._first_visible(
+            [
+                'input[type="password"]',
+                'input[name*="password" i]',
+                'input[autocomplete="new-password"]',
+            ]
+        ) is not None:
             return None
         try:
             split = self.page.locator('input[maxlength="1"]')
@@ -402,7 +618,7 @@ class XaiVisibleRegistration:
         return ("single", target) if target is not None else None
 
     def _turnstile_status(self) -> str:
-        """Return absent, pending, or passed for the currently rendered widget."""
+        """Return absent, pending, finishing, or passed for the current widget."""
         if self.page is None:
             return "absent"
         seen = False
@@ -421,6 +637,16 @@ class XaiVisibleRegistration:
         except Exception:
             pass
         try:
+            containers = self.page.locator(
+                '.cf-turnstile, [data-sitekey], [data-turnstile-widget]'
+            )
+            for index in range(min(5, int(containers.count()))):
+                if containers.nth(index).is_visible(timeout=300):
+                    seen = True
+                    break
+        except Exception:
+            pass
+        try:
             frames = self.page.locator('iframe[src*="challenges.cloudflare.com"]')
             for index in range(min(5, int(frames.count()))):
                 frame = frames.nth(index)
@@ -428,6 +654,7 @@ class XaiVisibleRegistration:
                     seen = True
         except Exception:
             pass
+        success_seen = False
         try:
             for frame in self.page.frames:
                 if "challenges.cloudflare.com" not in str(frame.url or ""):
@@ -435,35 +662,452 @@ class XaiVisibleRegistration:
                 seen = True
                 text = str(frame.locator("body").inner_text(timeout=500) or "")
                 if re.search(r"success|验证成功", text, re.I):
-                    return "passed"
+                    success_seen = True
         except Exception:
             pass
+        if success_seen:
+            # The widget can show Success before its callback writes the response
+            # token into the parent form. Only the token above authorizes submit.
+            return "finishing"
         return "pending" if seen else "absent"
 
+    def _locator_identity(self, locator: Any) -> str | None:
+        """Stable DOM identity for de-duplicating overlapping locators."""
+        try:
+            handle = locator.element_handle(timeout=300)
+        except Exception:
+            handle = None
+        if handle is not None:
+            try:
+                identity = handle.evaluate(
+                    """(node) => {
+                        if (!node) return '';
+                        const src = String(node.getAttribute?.('src') || node.src || '');
+                        const title = String(node.getAttribute?.('title') || node.title || '');
+                        const name = String(node.getAttribute?.('name') || node.name || '');
+                        const idAttr = String(node.id || '');
+                        const cls = String(node.className || '');
+                        const tag = String(node.tagName || '').toLowerCase();
+                        const rect = node.getBoundingClientRect?.() || {};
+                        const box = [
+                            Math.round(rect.x || 0),
+                            Math.round(rect.y || 0),
+                            Math.round(rect.width || 0),
+                            Math.round(rect.height || 0),
+                        ].join(',');
+                        return [tag, idAttr, name, title, src, cls, box].join('|');
+                    }"""
+                )
+                value = str(identity or "").strip()
+                if value:
+                    return value
+            except Exception:
+                pass
+        try:
+            box = locator.bounding_box(timeout=300)
+        except Exception:
+            box = None
+        if isinstance(box, dict):
+            return "|".join(
+                str(round(float(box.get(key) or 0.0), 1))
+                for key in ("x", "y", "width", "height")
+            )
+        return None
+
+    def _turnstile_iframe_locators(self) -> list[Any]:
+        """Return visible Cloudflare challenge iframes only."""
+        if self.page is None:
+            return []
+        # Keep selectors specific. Generic title*=widget matches unrelated embeds.
+        iframe_selectors = (
+            'iframe[src*="challenges.cloudflare.com"]',
+            'iframe[src*="turnstile"]',
+            'iframe[title*="cloudflare" i]',
+            'iframe[title*="turnstile" i]',
+            'iframe[title*="security challenge" i]',
+        )
+        iframes: list[Any] = []
+        seen: set[str] = set()
+        for selector in iframe_selectors:
+            try:
+                frames = self.page.locator(selector)
+                count = min(3, int(frames.count()))
+            except Exception:
+                continue
+            for index in range(count):
+                iframe = frames.nth(index)
+                try:
+                    if not iframe.is_visible(timeout=300):
+                        continue
+                except Exception:
+                    continue
+                identity = self._locator_identity(iframe) or f"{selector}#{index}"
+                if identity in seen:
+                    continue
+                seen.add(identity)
+                iframes.append(iframe)
+        return iframes
+
+    def _turnstile_frame_content(self, iframe: Any) -> Any | None:
+        try:
+            handle = iframe.element_handle(timeout=500)
+            if handle is None:
+                return None
+            return handle.content_frame()
+        except Exception:
+            return None
+
+    def _turnstile_interactive_markers(self, content: Any) -> bool:
+        """Heuristic: widget is the human-click checkbox challenge, not pure managed."""
+        try:
+            text = str(content.locator("body").inner_text(timeout=400) or "")
+        except Exception:
+            text = ""
+        if re.search(
+            r"verify you are human|i'?m not a robot|确认您是真人|进行人机验证|请完成以下操作",
+            text,
+            re.I,
+        ):
+            return True
+        marker_selectors = (
+            'input[type="checkbox"]',
+            ".cb-lb",
+            ".cb-i",
+            'label[class*="cb"]',
+            "#challenge-stage",
+        )
+        for selector in marker_selectors:
+            try:
+                node = content.locator(selector).first
+                if int(node.count()) > 0:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _turnstile_click_targets(self) -> list[tuple[str, Any]]:
+        """Return clickable Turnstile targets for confirmed interactive widgets.
+
+        New Turnstile often hides the real checkbox input and paints the box via
+        label/pseudo-elements. Only emit targets when interactive markers exist;
+        managed auto-pass widgets must not be clicked.
+        """
+        if self.page is None:
+            return []
+
+        targets: list[tuple[str, Any]] = []
+        seen_ids: set[str] = set()
+
+        def _add(kind: str, locator: Any) -> None:
+            marker = self._locator_identity(locator) or f"{kind}:{len(targets)}"
+            key = f"{kind}:{marker}"
+            if key in seen_ids:
+                return
+            seen_ids.add(key)
+            targets.append((kind, locator))
+
+        checkbox_selectors = (
+            'input[type="checkbox"]',
+            '.cb-lb input[type="checkbox"]',
+            'label input[type="checkbox"]',
+            "#challenge-stage input",
+        )
+        surface_selectors = (
+            "label.cb-lb",
+            ".cb-lb",
+            ".cb-i",
+            'label[class*="cb"]',
+            "#challenge-stage",
+        )
+
+        for iframe in self._turnstile_iframe_locators():
+            content = self._turnstile_frame_content(iframe)
+            if content is None:
+                # Unreadable frame content is not proof of an interactive challenge.
+                continue
+            if not self._turnstile_interactive_markers(content):
+                continue
+
+            for checkbox_selector in checkbox_selectors:
+                try:
+                    checkbox = content.locator(checkbox_selector).first
+                    if int(checkbox.count()) <= 0:
+                        continue
+                    _add("checkbox", checkbox)
+                    break
+                except Exception:
+                    continue
+            for surface_selector in surface_selectors:
+                try:
+                    surface = content.locator(surface_selector).first
+                    if int(surface.count()) <= 0:
+                        continue
+                    _add("surface", surface)
+                    break
+                except Exception:
+                    continue
+            _add("iframe", iframe)
+        return targets
+
+    def _turnstile_needs_click(self) -> bool:
+        """True only when interactive markers are readable inside a CF iframe."""
+        if self.page is None:
+            return False
+        for iframe in self._turnstile_iframe_locators():
+            content = self._turnstile_frame_content(iframe)
+            if content is None:
+                # Loading/unreadable content: keep waiting for auto-pass or markers.
+                continue
+            if self._turnstile_interactive_markers(content):
+                return True
+        return False
+
+    def _click_point(self, x: float, y: float) -> bool:
+        if self.page is None:
+            return False
+        try:
+            self.page.mouse.click(x, y)
+            return True
+        except Exception:
+            return False
+
+    def _click_locator_center(self, locator: Any, *, timeout: int = 1_500) -> bool:
+        """Dispatch a click; True only means the browser accepted the event."""
+        try:
+            locator.scroll_into_view_if_needed(timeout=timeout)
+        except Exception:
+            pass
+        try:
+            box = locator.bounding_box(timeout=timeout)
+        except Exception:
+            box = None
+        if isinstance(box, dict) and box.get("width") and box.get("height"):
+            x = float(box["x"]) + float(box["width"]) / 2.0
+            y = float(box["y"]) + float(box["height"]) / 2.0
+            if self._click_point(x, y):
+                return True
+        try:
+            locator.click(timeout=timeout, force=True)
+            return True
+        except Exception:
+            return False
+
+    def _click_iframe_checkbox_region(self, iframe: Any, *, timeout: int = 1_500) -> bool:
+        """Click the left checkbox zone of a Turnstile iframe widget."""
+        try:
+            if not iframe.is_visible(timeout=timeout):
+                return False
+            iframe.scroll_into_view_if_needed(timeout=timeout)
+        except Exception:
+            pass
+        try:
+            box = iframe.bounding_box(timeout=timeout)
+        except Exception:
+            box = None
+        if not isinstance(box, dict) or not box.get("width") or not box.get("height"):
+            return self._click_locator_center(iframe, timeout=timeout)
+        # Checkbox sits near the left edge of the managed/interactive widget.
+        x = float(box["x"]) + min(28.0, max(12.0, float(box["width"]) * 0.12))
+        y = float(box["y"]) + float(box["height"]) / 2.0
+        if self._click_point(x, y):
+            return True
+        return self._click_locator_center(iframe, timeout=timeout)
+
+    def _turnstile_click_advanced(self, before: str, after: str | None = None) -> bool:
+        """True only when status advanced to finishing/passed.
+
+        pending -> absent is NOT success: the widget may remount, briefly detach,
+        or status probing can fail. Those cases must keep trying other strategies.
+        """
+        del before  # retained for call-site clarity / future transitions
+        current = after if after is not None else self._turnstile_status()
+        return current in {"passed", "finishing"}
+
+    def _signup_form_present(self) -> bool:
+        return self._first_visible(
+            [
+                'input[type="password"]',
+                'input[name*="password" i]',
+                'input[autocomplete="new-password"]',
+                'input[name*="first" i]',
+                'input[name*="given" i]',
+                'input[name*="last" i]',
+                'input[name*="family" i]',
+                'input[name="name"]',
+                'input[name*="fullName" i]',
+            ]
+        ) is not None
+
+    def _wait_for_signup_transition(self, pattern: str) -> None:
+        """Confirm the profile submit changed state, retrying only if still actionable."""
+        if self.page is None:
+            raise XaiBrowserError("xAI 注册页面已经关闭")
+        initial_url = str(self.page.url or "")
+        deadline = min(self.deadline, time.time() + SIGNUP_SUBMIT_TIMEOUT_SEC)
+        attempts = 1
+        next_retry_at = time.time() + SIGNUP_SUBMIT_RETRY_SEC
+        form_absent_polls = 0
+        self._progress("completion", "waiting_for_transition", attempt=attempts)
+        while time.time() < deadline:
+            self._check_cancel()
+            sso, _cookies = self._extract_sso()
+            current_url = str(self.page.url or "")
+            if sso:
+                self._progress(
+                    "completion",
+                    "transition_detected",
+                    attempt=attempts,
+                    evidence="sso_cookie",
+                )
+                return
+            if not self._signup_form_present():
+                form_absent_polls += 1
+                if form_absent_polls >= SIGNUP_TRANSITION_STABLE_POLLS:
+                    self._progress(
+                        "completion",
+                        "transition_detected",
+                        attempt=attempts,
+                        evidence="form_absent",
+                        url_changed=current_url != initial_url,
+                    )
+                    return
+                self._wait(250)
+                continue
+            form_absent_polls = 0
+            now = time.time()
+            if now >= next_retry_at and attempts < SIGNUP_SUBMIT_MAX_ATTEMPTS:
+                action = self._find_action(pattern)
+                if action is not None:
+                    attempts += 1
+                    self._progress("completion", "retrying_submit", attempt=attempts)
+                    if not self._click_locator_center(action, timeout=3_000):
+                        self._progress("completion", "retry_click_failed", attempt=attempts)
+                    next_retry_at = now + SIGNUP_SUBMIT_RETRY_SEC
+            self._wait(250)
+        raise XaiBrowserError(
+            f"xAI 资料提交后页面未变化，已尝试点击 {attempts} 次"
+        )
+
+    def _dispatch_turnstile_target_click(self, kind: str, target: Any) -> bool:
+        """Fire one click strategy. True only means the event was dispatched."""
+        if kind == "iframe":
+            return self._click_iframe_checkbox_region(target, timeout=1_200)
+        if kind == "checkbox":
+            # Hidden checkbox force-click is attempted, but never treated as the
+            # only strategy: caller falls through when status stays pending.
+            try:
+                target.click(timeout=1_200, force=True)
+                return True
+            except Exception:
+                return self._click_locator_center(target, timeout=1_200)
+        return self._click_locator_center(target, timeout=1_200)
+
+    def _click_turnstile_challenge(self) -> bool:
+        """Click interactive Turnstile surfaces until status advances or options end.
+
+        A Playwright click without exception is not success. Only finishing/passed
+        counts. pending -> absent is treated as no-effect so strategies continue.
+        """
+        before = self._turnstile_status()
+        if before in {"passed", "finishing"}:
+            return True
+        if before == "absent":
+            return False
+
+        attempted = False
+        for kind, target in self._turnstile_click_targets():
+            attempted = True
+            self._progress("human_verification", f"click_attempt_{kind}")
+            dispatched = self._dispatch_turnstile_target_click(kind, target)
+            if not dispatched:
+                self._progress("human_verification", f"click_dispatch_failed_{kind}")
+                continue
+            self._wait(TURNSTILE_CLICK_EFFECT_WAIT_MS)
+            after = self._turnstile_status()
+            if self._turnstile_click_advanced(before, after):
+                self._progress("human_verification", f"click_effect_{kind}")
+                return True
+            if after == "absent":
+                self._progress("human_verification", f"click_widget_missing_{kind}")
+            else:
+                self._progress("human_verification", f"click_no_effect_{kind}")
+        return False if attempted else False
+
     def _wait_for_turnstile(self) -> None:
-        """Continue immediately when absent, otherwise wait for automatic/manual pass."""
+        """Wait for token-backed pass; allow late widget mount before giving up."""
         status = self._turnstile_status()
-        if status == "absent":
-            self._progress("human_verification", "not_required")
-            return
         if status == "passed":
             self._progress("human_verification", "passed")
             return
 
-        self._progress("human_verification", "detected")
+        # Do not treat the first absent sample as "not required". Profile pages
+        # often mount Turnstile shortly after password fill.
+        if status == "absent":
+            self._progress("human_verification", "waiting_for_widget_mount")
+        else:
+            self._progress("human_verification", "detected")
+
         if not self.headless and self.page is not None:
             try:
                 self.page.bring_to_front()
             except Exception:
                 pass
-            self._progress("human_verification", "waiting_for_manual_action")
+
+        # Managed/non-interactive Turnstile usually resolves itself. Only click
+        # after interactive markers are readable. Success text alone is not pass:
+        # the parent form needs cf-turnstile-response before submit is safe.
+        if status != "absent":
+            self._progress("human_verification", "waiting_for_auto_pass")
         deadline = min(self.deadline, time.time() + TURNSTILE_WAIT_SEC)
+        mount_deadline = time.time() + TURNSTILE_MOUNT_GRACE_SEC
+        click_attempts = 0
+        last_click_at = 0.0
+        finishing_logged = False
+        seen_widget = status != "absent"
         while time.time() < deadline:
             self._check_cancel()
             status = self._turnstile_status()
             if status == "passed":
                 self._progress("human_verification", "passed")
                 return
+            if status == "absent":
+                # Still within grace: widget may be mounting. After grace and never
+                # seeing a widget, treat as not required. If we already saw one and
+                # it disappeared, keep waiting until the main deadline.
+                if not seen_widget and time.time() >= mount_deadline:
+                    self._progress("human_verification", "not_required")
+                    return
+                self._wait(250)
+                continue
+            if not seen_widget:
+                seen_widget = True
+                self._progress("human_verification", "detected")
+                self._progress("human_verification", "waiting_for_auto_pass")
+            if status == "finishing":
+                if not finishing_logged:
+                    self._progress("human_verification", "waiting_for_response_token")
+                    finishing_logged = True
+                # Keep waiting for the response token. Do not treat "Success" text
+                # plus an enabled submit button as passed.
+                self._wait(250)
+                continue
+            finishing_logged = False
+            can_retry_click = (
+                click_attempts < TURNSTILE_MAX_CLICK_ATTEMPTS
+                and time.time() - last_click_at >= TURNSTILE_CLICK_COOLDOWN_SEC
+            )
+            if can_retry_click and self._turnstile_needs_click():
+                self._progress("human_verification", "manual_click_required")
+                click_attempts += 1
+                last_click_at = time.time()
+                if self._click_turnstile_challenge():
+                    self._progress("human_verification", "clicked_challenge")
+                    # Effect already observed inside the click helper; re-check now.
+                    if self._turnstile_status() == "passed":
+                        self._progress("human_verification", "passed")
+                        return
+                elif not self.headless:
+                    self._progress("human_verification", "waiting_for_manual_action")
             self._wait(250)
         if self.headless:
             raise XaiBrowserError(
@@ -566,6 +1210,8 @@ class XaiVisibleRegistration:
                     r"^sign up with email$|使用邮箱.*注册|邮箱注册"
                 ):
                     raise XaiBrowserError("未找到 xAI 邮箱注册入口")
+                if not self._wait_for_email_signup_form():
+                    raise XaiBrowserError("已点击 xAI 邮箱注册入口，但邮箱表单未加载")
                 acted.add("signup_method")
                 self._progress("signup_method", "selected")
                 self._settle_page()
@@ -702,10 +1348,15 @@ class XaiVisibleRegistration:
                             break
                         if attempt == 1:
                             raise XaiBrowserError("xAI 页面反复重绘并清空密码输入框")
+                submit_pattern = (
+                    "complete sign up|continue|next|sign up|create account|submit|"
+                    "继续|下一步|创建"
+                )
                 self._submit(
                     anchor,
-                    "complete sign up|continue|next|sign up|create account|submit|继续|下一步|创建",
+                    submit_pattern,
                 )
+                self._wait_for_signup_transition(submit_pattern)
                 for part in pending:
                     acted.add(part)
                     self._progress(part, "submitted")
@@ -819,13 +1470,22 @@ class XaiVisibleRegistration:
         self._action_delay()
         self.page.goto(verify_url, wait_until="domcontentloaded", timeout=45_000)
         self._wait(600)
-        submitted_code = False
-        approved = False
+        code_filled = False
+        code_attempts = 0
+        approval_attempts = 0
+        last_code_submit_at = 0.0
+        last_approval_at = 0.0
+        busy_state = ""
+        waiting_approval_logged = False
+        approval_processing_seen = False
+        action_settle_sec = 5.0
         deadline = min(self.deadline, time.time() + 90.0)
         while time.time() < deadline:
             self._check_cancel()
             text = self._page_text()
             url = str(self.page.url or "")
+            if re.search(r"/(?:sign-in|sign-up)(?:[/?#]|$)", url, re.I):
+                raise XaiBrowserError("协议登录会话未被授权浏览器接受，页面跳转到登录入口")
             if "done" in url or re.search(
                 r"device.*(?:authorized|approved)|authorization complete|you may close",
                 text,
@@ -835,34 +1495,85 @@ class XaiVisibleRegistration:
                 return
             if re.search(r"expired|invalid.*code|request.*denied", text, re.I):
                 raise XaiBrowserError(f"xAI 设备授权失败：{text[:240]}")
-            if not submitted_code:
-                target = self._first_visible(
-                    [
-                        'input[name="user_code"]',
-                        'input[name*="code" i]',
-                        'input[autocomplete="one-time-code"]',
-                    ]
-                )
-                if target is not None:
+            action_busy = self._device_action_busy()
+            if action_busy and code_attempts > 0 and approval_attempts == 0:
+                if busy_state != "code":
+                    busy_state = "code"
+                    self._progress("oauth", "device_code_processing")
+            elif action_busy and approval_attempts > 0:
+                approval_processing_seen = True
+                if busy_state != "approval":
+                    busy_state = "approval"
+                    self._progress("oauth", "approval_processing")
+            target = self._first_visible(
+                [
+                    'input[name="user_code"]',
+                    'input[name*="code" i]',
+                    'input[autocomplete="one-time-code"]',
+                ]
+            )
+            if target is not None:
+                if not code_filled:
                     self._action_delay()
                     target.fill(user_code)
-                    self._submit(target, "continue|verify|submit|继续|验证")
-                    submitted_code = True
-                    self._progress("oauth", "device_code_submitted")
+                    code_filled = True
+                    self._progress("oauth", "device_code_filled")
+                    self._wait(250)
+                if action_busy:
                     self._wait(500)
                     continue
-            if not approved:
-                action = self._find_action(
-                    "allow|authorize|approve|accept|confirm|允许|授权|同意|确认"
-                )
-                if action is not None:
+                busy_state = ""
+                if code_attempts == 0:
                     self._action_delay()
-                    action.click(timeout=3_000)
-                    approved = True
-                    self._progress("oauth", "approval_submitted")
+                    self._submit(target, "continue|verify|submit|继续|验证")
+                    code_attempts += 1
+                    last_code_submit_at = time.time()
+                    self._progress(
+                        "oauth", "device_code_submitted", attempt=code_attempts
+                    )
+                    self._wait(800)
+                else:
+                    if not waiting_approval_logged:
+                        waiting_approval_logged = True
+                        self._progress("oauth", "waiting_for_approval_page")
+                    self._wait(200)
+                continue
+            action = self._find_action(
+                "allow|authorize|approve|accept|confirm|允许|授权|同意|确认"
+            )
+            if action is not None:
+                if action_busy:
                     self._wait(500)
                     continue
+                if approval_attempts > 0 and (
+                    approval_processing_seen
+                    or time.time() - last_approval_at >= action_settle_sec
+                ):
+                    self._progress("oauth", "approval_roundtrip_complete")
+                    return
+                busy_state = ""
+                if approval_attempts == 0:
+                    self._action_delay()
+                    if not self._click_locator_center(action, timeout=3_000):
+                        action.click(timeout=3_000)
+                    approval_attempts += 1
+                    last_approval_at = time.time()
+                    self._progress(
+                        "oauth", "approval_submitted", attempt=approval_attempts
+                    )
+                    self._wait(800)
+                else:
+                    self._wait(200)
+                continue
+            if not action_busy and approval_attempts > 0 and (
+                approval_processing_seen
+                or time.time() - last_approval_at >= action_settle_sec
+            ):
+                self._progress("oauth", "approval_roundtrip_complete")
+                return
             self._wait(250)
+        if code_attempts > 0 and approval_attempts == 0:
+            raise XaiBrowserError("Device Code 已提交，但页面始终未进入 Allow 授权确认页")
         raise XaiBrowserError("xAI 设备授权页面等待超时")
 
     def hold_failure(self, *, seconds: float = 20.0) -> None:

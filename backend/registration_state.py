@@ -3,7 +3,9 @@ from __future__ import annotations
 
 import json
 import os
+import threading
 import time
+import uuid
 from pathlib import Path
 from typing import Any
 
@@ -46,6 +48,19 @@ ACTIVE_SESSION_STATUSES = {
     "import_queued",
 }
 ACTIVE_BATCH_STATUSES = {"queued", "starting", "started", "running", "pausing", "resuming"}
+_save_lock = threading.RLock()
+_REPLACE_RETRY_DELAYS = (0.01, 0.02, 0.05, 0.1, 0.2)
+
+
+def _replace_with_retry(source: Path, target: Path) -> None:
+    for attempt in range(len(_REPLACE_RETRY_DELAYS) + 1):
+        try:
+            os.replace(source, target)
+            return
+        except PermissionError:
+            if attempt >= len(_REPLACE_RETRY_DELAYS):
+                raise
+            time.sleep(_REPLACE_RETRY_DELAYS[attempt])
 
 
 def _safe(value: Any, key: str = "") -> Any:
@@ -79,9 +94,15 @@ def save_state(target: str, sessions: dict[str, Any], batches: dict[str, Any]) -
         "sessions": _safe(sessions),
         "batches": _safe(batches),
     }
-    temp = path.with_suffix(f".tmp.{os.getpid()}")
-    temp.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-    os.replace(temp, path)
+    with _save_lock:
+        temp = path.with_suffix(f".tmp.{os.getpid()}.{uuid.uuid4().hex}")
+        try:
+            temp.write_text(
+                json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8"
+            )
+            _replace_with_retry(temp, path)
+        finally:
+            temp.unlink(missing_ok=True)
     return path
 
 

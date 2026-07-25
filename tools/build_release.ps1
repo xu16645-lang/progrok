@@ -1,9 +1,14 @@
+param(
+    [string]$Version = ""
+)
+
 $ErrorActionPreference = "Stop"
 $ToolsRoot = [IO.Path]::GetFullPath((Split-Path -Parent $MyInvocation.MyCommand.Path))
 $Root = [IO.Path]::GetFullPath((Split-Path -Parent $ToolsRoot))
 $ReleaseRoot = [IO.Path]::GetFullPath((Join-Path $Root "artifacts\release"))
 $Stage = [IO.Path]::GetFullPath((Join-Path $ReleaseRoot "progrok-windows"))
-$Zip = Join-Path $ReleaseRoot ("progrok-windows-{0}.zip" -f (Get-Date -Format "yyyyMMdd"))
+$ReleaseName = if ($Version.Trim()) { $Version.Trim().TrimStart('v') } else { Get-Date -Format "yyyyMMdd" }
+$Zip = Join-Path $ReleaseRoot ("progrok-windows-{0}.zip" -f $ReleaseName)
 
 function Assert-ChildPath([string]$Path, [string]$Parent) {
     $prefix = $Parent.TrimEnd('\') + '\'
@@ -21,6 +26,20 @@ function Copy-SelectedFiles([string]$SourceRoot, [string]$DestinationRoot, [stri
     }
 }
 
+function Copy-SourceTree([string]$SourceRoot, [string]$DestinationRoot, [string[]]$Extensions) {
+    if (-not (Test-Path -LiteralPath $SourceRoot)) { throw "Missing source directory: $SourceRoot" }
+    $files = Get-ChildItem -LiteralPath $SourceRoot -Recurse -File | Where-Object {
+        $_.FullName -notmatch '(?i)\\(__pycache__|\.pytest_cache|\.ruff_cache|node_modules|\.venv|runtime|output|logs)\\' -and
+        ($Extensions.Count -eq 0 -or $Extensions -contains $_.Extension.ToLowerInvariant())
+    }
+    foreach ($file in $files) {
+        $relative = [IO.Path]::GetRelativePath($SourceRoot, $file.FullName)
+        $destination = Join-Path $DestinationRoot $relative
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $destination) | Out-Null
+        Copy-Item -LiteralPath $file.FullName -Destination $destination
+    }
+}
+
 Assert-ChildPath $Stage $ReleaseRoot
 New-Item -ItemType Directory -Force -Path $ReleaseRoot | Out-Null
 if (Test-Path -LiteralPath $Stage) {
@@ -33,25 +52,13 @@ Copy-SelectedFiles $Root $Stage @(
     "start.cmd", "start.ps1", "stop.cmd", "stop.ps1"
 )
 
-Copy-SelectedFiles (Join-Path $Root "backend") (Join-Path $Stage "backend") @(
-    "account_pipeline.py", "accounts.py", "app.py", "config.py", "export_formats.py",
-    "chatgpt_browser.py", "chatgpt_build_adapter.py", "chatgpt_session_to_auth.py",
-    "grok_build_adapter.py", "hotmail_local.py", "model_health.py", "moemail.py",
-    "performance_tuning.py", "proxy_pool.py", "requirements.txt", "sso_to_auth_json.py"
-)
-Copy-SelectedFiles (Join-Path $Root "web\static") (Join-Path $Stage "web\static") @(
-    "app.js", "index.html", "style.css"
-)
+Copy-SourceTree (Join-Path $Root "backend") (Join-Path $Stage "backend") @(".py", ".txt")
+Copy-SourceTree (Join-Path $Root "web") (Join-Path $Stage "web") @(".js", ".html", ".css", ".svg")
 Copy-SelectedFiles (Join-Path $Root "config") (Join-Path $Stage "config") @(
     ".env.example"
 )
-Copy-SelectedFiles (Join-Path $Root "tools") (Join-Path $Stage "tools") @(
-    "build_release.ps1", "hotmail_helper.py"
-)
-Copy-SelectedFiles (Join-Path $Root "tests") (Join-Path $Stage "tests") @(
-    "test_account_pipeline.py", "test_chatgpt_browser.py", "test_hotmail_local.py",
-    "test_performance_tuning.py"
-)
+Copy-SourceTree (Join-Path $Root "tools") (Join-Path $Stage "tools") @(".py", ".ps1")
+Copy-SourceTree (Join-Path $Root "tests") (Join-Path $Stage "tests") @(".py")
 
 $VendorFiles = [ordered]@{
     "turnstile-solver" = @("api_solver.py", "browser_configs.py", "db_results.py", "requirements.txt")
@@ -96,8 +103,9 @@ if (Test-Path -LiteralPath $LocalConfig) {
         if (-not $value -or $value.Length -lt 5) { continue }
         if ($key -eq "mail_base_url" -and $value -eq "https://maliapi.215.im") { continue }
         if ($key -eq "mail_domain" -and -not $value.Trim()) { continue }
+        if ($key -eq "proxy" -and $value -match '(?i)(127\.0\.0\.1|localhost)') { continue }
         if (Select-String -LiteralPath $TextFiles.FullName -SimpleMatch -Pattern $value -Quiet) {
-            throw "Release security scan found a value from the local private configuration."
+            throw "Release security scan found a value from local private configuration key: $key"
         }
     }
 }
