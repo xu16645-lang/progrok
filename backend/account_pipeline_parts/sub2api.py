@@ -4,7 +4,7 @@ from __future__ import annotations
 import json
 import threading
 import time
-from typing import Any, Callable
+from typing import Any
 
 import httpx
 
@@ -16,6 +16,7 @@ from .common import (
 
 
 _AUTH_CACHE_TTL_SECONDS = 5 * 60
+_AUTH_LOGIN_RETRY_DELAYS = (3.0, 8.0, 15.0)
 _AUTH_CACHE_LOCK = threading.RLock()
 _AUTH_CACHE: dict[tuple[str, str, str], tuple[float, dict[str, str]]] = {}
 
@@ -31,6 +32,14 @@ def _password_auth_cache_key(base: str, email: str, password: str) -> tuple[str,
 def _clear_sub2api_auth_cache() -> None:
     with _AUTH_CACHE_LOCK:
         _AUTH_CACHE.clear()
+
+
+def _login_retry_delay(response: httpx.Response, fallback: float) -> float:
+    raw = str(response.headers.get("Retry-After") or "").strip()
+    try:
+        return max(0.0, min(30.0, float(raw))) if raw else fallback
+    except (TypeError, ValueError):
+        return fallback
 
 
 def _sub2api_auth_headers(
@@ -65,11 +74,24 @@ def _sub2api_auth_headers(
         _AUTH_CACHE.pop(cache_key, None)
 
         # Serialize password login so a concurrent probe batch performs one login.
-        login_response = http.post(
-            f"{base}/api/v1/auth/login",
-            headers={"Content-Type": "application/json"},
-            json={"email": email, "password": password},
-        )
+        login_response = None
+        for attempt in range(len(_AUTH_LOGIN_RETRY_DELAYS) + 1):
+            login_response = http.post(
+                f"{base}/api/v1/auth/login",
+                headers={"Content-Type": "application/json"},
+                json={"email": email, "password": password},
+            )
+            if login_response.status_code != 429:
+                break
+            if attempt >= len(_AUTH_LOGIN_RETRY_DELAYS):
+                break
+            time.sleep(
+                _login_retry_delay(
+                    login_response,
+                    _AUTH_LOGIN_RETRY_DELAYS[attempt],
+                )
+            )
+        assert login_response is not None
         if login_response.status_code >= 300:
             status_code = login_response.status_code
             retryable = status_code == 429
@@ -223,218 +245,6 @@ def _find_sub2api_account(
         if item_email == target:
             return item
     return None
-
-
-def create_grok_oauth_in_sub2api(
-    *,
-    authorize: Callable[[str, str], str],
-    email: str,
-    base_url: str,
-    api_key: str = "",
-    auth_mode: str = "password",
-    admin_email: str = "",
-    admin_password: str = "",
-    group_id: int = 0,
-    client: httpx.Client | None = None,
-) -> dict[str, Any]:
-    """Let Sub2API own PKCE/token exchange and create the Grok OAuth account."""
-    base = str(base_url or "").strip().rstrip("/")
-    owned = client is None
-    http = client or httpx.Client(timeout=60.0)
-    try:
-        auth_headers, error = _sub2api_auth_headers(
-            http,
-            base=base,
-            api_key=api_key,
-            auth_mode=auth_mode,
-            admin_email=admin_email,
-            admin_password=admin_password,
-        )
-        if error:
-            return error
-        headers = {**(auth_headers or {}), "Content-Type": "application/json"}
-        auth_response = http.post(
-            f"{base}/api/v1/admin/grok/oauth/auth-url",
-            headers=headers,
-            json={},
-        )
-        if auth_response.status_code >= 300:
-            return {
-                "ok": False,
-                "target": "sub2api",
-                "stage": "auth_url",
-                "status_code": auth_response.status_code,
-                "error": f"Sub2API 生成 Grok 授权链接失败：{_error_text(auth_response)}",
-            }
-        auth_payload = auth_response.json()
-        auth_data = (
-            auth_payload.get("data")
-            if isinstance(auth_payload, dict)
-            and isinstance(auth_payload.get("data"), dict)
-            else auth_payload
-        )
-        auth_url = str(auth_data.get("auth_url") or "") if isinstance(auth_data, dict) else ""
-        session_id = str(auth_data.get("session_id") or "") if isinstance(auth_data, dict) else ""
-        state = str(auth_data.get("state") or "") if isinstance(auth_data, dict) else ""
-        if not auth_url or not session_id or not state:
-            return {
-                "ok": False,
-                "target": "sub2api",
-                "stage": "auth_url",
-                "error": "Sub2API Grok 授权链接响应缺少 auth_url、session_id 或 state",
-            }
-
-        callback_input = str(authorize(auth_url, state) or "").strip()
-        if not callback_input:
-            return {
-                "ok": False,
-                "target": "sub2api",
-                "stage": "browser_authorize",
-                "error": "浏览器完成 Sub2API Grok 授权后未取得回调地址或授权码",
-            }
-
-        selected_group_id = int(group_id or 0)
-        create_response = http.post(
-            f"{base}/api/v1/admin/grok/oauth/create-from-oauth",
-            headers=headers,
-            json={
-                "session_id": session_id,
-                "code": callback_input,
-                "state": state,
-                "name": str(email or "").strip().lower() or "Grok OAuth Account",
-                "concurrency": 3,
-                "priority": 50,
-                "group_ids": [selected_group_id] if selected_group_id else [],
-            },
-        )
-        if create_response.status_code >= 300:
-            return {
-                "ok": False,
-                "target": "sub2api",
-                "stage": "create_account",
-                "status_code": create_response.status_code,
-                "error": f"Sub2API 回填 Grok 授权码失败：{_error_text(create_response)}",
-            }
-        create_payload = create_response.json()
-        account = (
-            create_payload.get("data")
-            if isinstance(create_payload, dict)
-            and isinstance(create_payload.get("data"), dict)
-            else create_payload
-        )
-        account_id = account.get("id") if isinstance(account, dict) else None
-        if not account_id:
-            return {
-                "ok": False,
-                "target": "sub2api",
-                "stage": "create_account",
-                "error": "Sub2API 返回授权成功，但响应中没有账号 ID",
-            }
-        return {
-            "ok": True,
-            "target": "sub2api",
-            "status_code": create_response.status_code,
-            "account_id": account_id,
-            "email": str(account.get("name") or email or "").strip().lower(),
-            "group_id": selected_group_id or None,
-            "path": "grok_oauth_callback",
-        }
-    except (httpx.HTTPError, RuntimeError, ValueError) as exc:
-        return {
-            "ok": False,
-            "target": "sub2api",
-            "error": f"Sub2API Grok OAuth 网络错误：{str(exc)[:220]}",
-        }
-    finally:
-        if owned:
-            http.close()
-
-
-def import_grok_sso_to_sub2api(
-    *,
-    sso_token: str,
-    email: str,
-    base_url: str,
-    api_key: str = "",
-    auth_mode: str = "password",
-    admin_email: str = "",
-    admin_password: str = "",
-    group_id: int = 0,
-    client: httpx.Client | None = None,
-) -> dict[str, Any]:
-    """Use Sub2API's native SSO-to-OAuth importer when consent is denied."""
-    base = str(base_url or "").strip().rstrip("/")
-    token = str(sso_token or "").strip()
-    if not token:
-        return {"ok": False, "target": "sub2api", "error": "缺少可导入的 xAI SSO"}
-    owned = client is None
-    http = client or httpx.Client(timeout=90.0)
-    try:
-        auth_headers, error = _sub2api_auth_headers(
-            http,
-            base=base,
-            api_key=api_key,
-            auth_mode=auth_mode,
-            admin_email=admin_email,
-            admin_password=admin_password,
-        )
-        if error:
-            return error
-        selected_group_id = int(group_id or 0)
-        response = http.post(
-            f"{base}/api/v1/admin/grok/sso-to-oauth",
-            headers={**(auth_headers or {}), "Content-Type": "application/json"},
-            json={
-                "sso_token": token,
-                "name": str(email or "").strip().lower() or "Grok OAuth Account",
-                "concurrency": 3,
-                "priority": 50,
-                "group_ids": [selected_group_id] if selected_group_id else [],
-            },
-        )
-        if response.status_code >= 300:
-            return {
-                "ok": False,
-                "target": "sub2api",
-                "stage": "sso_to_oauth",
-                "status_code": response.status_code,
-                "error": f"Sub2API SSO 导入失败：{_error_text(response)}",
-            }
-        payload = response.json()
-        data = payload.get("data") if isinstance(payload, dict) else None
-        result = data if isinstance(data, dict) else payload
-        created = result.get("created") if isinstance(result, dict) else None
-        failed = result.get("failed") if isinstance(result, dict) else None
-        first = created[0] if isinstance(created, list) and created else None
-        account = first.get("account") if isinstance(first, dict) else None
-        account_id = account.get("id") if isinstance(account, dict) else None
-        if not account_id:
-            failure = failed[0].get("error") if isinstance(failed, list) and failed and isinstance(failed[0], dict) else ""
-            return {
-                "ok": False,
-                "target": "sub2api",
-                "stage": "sso_to_oauth",
-                "error": f"Sub2API SSO 导入未创建账号：{failure or '响应缺少账号 ID'}",
-            }
-        return {
-            "ok": True,
-            "target": "sub2api",
-            "status_code": response.status_code,
-            "account_id": account_id,
-            "email": str((first or {}).get("email") or email or "").strip().lower(),
-            "group_id": selected_group_id or None,
-            "path": "grok_sso_to_oauth",
-        }
-    except (httpx.HTTPError, ValueError) as exc:
-        return {
-            "ok": False,
-            "target": "sub2api",
-            "stage": "sso_to_oauth",
-            "error": f"Sub2API SSO 导入网络错误：{str(exc)[:220]}",
-        }
-    finally:
-        if owned:
-            http.close()
 
 
 def probe_grok_account_in_sub2api(

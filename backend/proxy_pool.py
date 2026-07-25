@@ -20,7 +20,7 @@ import os
 import random
 import threading
 from typing import Any, Iterable
-from urllib.parse import quote, unquote, urlparse, urlunparse
+from urllib.parse import quote, unquote, urlparse
 
 _lock = threading.Lock()
 _rr_index = 0

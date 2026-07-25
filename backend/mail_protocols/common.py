@@ -10,7 +10,7 @@ from urllib.parse import quote, unquote, urlparse, urlunparse
 
 import httpx
 
-from config import (
+from config import (  # noqa: F401 - protocol modules import these from this facade
     MOEMAIL_API_KEY,
     MOEMAIL_BASE_URL,
     MOEMAIL_DOMAIN,

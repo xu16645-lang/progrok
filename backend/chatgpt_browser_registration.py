@@ -2,9 +2,8 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
-from chatgpt_browser_context import BrowserContext
 
 
 def register_chatgpt_account(

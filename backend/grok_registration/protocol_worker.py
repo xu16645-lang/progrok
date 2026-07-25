@@ -70,9 +70,6 @@ def _run_registration(
             YesCaptchaSolver,
         )
         from xconsole_client import config as C
-        from xconsole_client.oauth_protocol import extract_cookies_from_auth_client
-        import accounts
-        from config import UPSTREAM_BASE
 
         update("registering", "visiting signup page")
         _check_cancel()
@@ -478,181 +475,19 @@ def _run_registration(
                 pass
 
         update(
-            "fetching_sso",
-            f"create_account HTTP {http_status} accepted; extracting SSO [{ctx.ADAPTER_BUILD}]",
+            "authorizing",
+            "半协议注册成功，正在启动浏览器完成自然登录",
+            registration_succeeded_at=ctx._now(),
         )
-
-        sso = None
-        try:
-            sso = client.fetch_sso_token(
-                email=email,
-                password=password,
-                save=True,
-                output_dir=str(ctx.RUNTIME_DATA_DIR / "sso_output"),
-                retries=4,
-            )
-        except Exception as sso_fetch_err:  # noqa: BLE001
-            print(f"[grok-build-auth] fetch_sso_token error: {sso_fetch_err}")
-
-        if not sso:
-            try:
-                from xconsole_client.sso import (
-                    SSOExtractor,
-                    parse_all_set_cookie_urls,
-                    parse_sso_from_set_cookies,
-                    parse_sso_jwt_url,
-                    parse_sso_token_from_text,
-                )
-
-                sso = parse_sso_from_set_cookies(sc) or parse_sso_token_from_text(
-                    rsc_body
-                )
-                if not sso and rsc_body:
-                    print(
-                        f"[grok-build-auth] set-cookie candidates="
-                        f"{parse_all_set_cookie_urls(rsc_body)[:3]}"
-                    )
-                    print(
-                        f"[grok-build-auth] primary set-cookie url="
-                        f"{parse_sso_jwt_url(rsc_body)}"
-                    )
-                    extractor = SSOExtractor(
-                        transport_request=client._request,
-                        base_headers=client._base_headers,
-                        cookie_jar=client._t.cookies,
-                        debug=True,
-                    )
-                    sso = extractor.extract(
-                        rsc_body, email=email, password=password, save=False
-                    )
-            except Exception as recover_err:  # noqa: BLE001
-                print(f"[grok-build-auth] SSO recover failed: {recover_err}")
-
-                # Current xAI create_account often returns only RSC chunks + CF cookies,
-                # with no set-cookie JWT chain. Fall back to password CreateSession and
-                # treat the returned session JWT as the sso cookie for sso_to_auth_json.
-        if not sso:
-            update(
-                "fetching_sso",
-                f"账号创建请求已接受，正在确认登录会话 [{ctx.ADAPTER_BUILD}]",
-            )
-
-            def _cancelable_wait(seconds: float) -> None:
-                deadline = ctx.time.time() + max(0.0, seconds)
-                while ctx.time.time() < deadline:
-                    _check_cancel()
-                    ctx.time.sleep(min(0.25, max(0.0, deadline - ctx.time.time())))
-
-            signin_url = "https://accounts.x.ai/sign-in?redirect=grok-com"
-            login_delays = (3.0, 6.0, 10.0)
-            last_login_error: dict[str, Any] = {}
-            for login_attempt, propagation_delay in enumerate(login_delays, start=1):
-                _check_cancel()
-                update(
-                    "fetching_sso",
-                    f"正在确认登录会话（第 {login_attempt}/{len(login_delays)} 次）",
-                )
-                _cancelable_wait(propagation_delay)
-                _check_cancel()
-                try:
-                    # Every CreateSession submission gets its own sign-in
-                    # challenge. Never reuse the sign-up or a prior login token.
-                    signin_turnstile = _solve_turnstile(
-                        signin_url, premium=(provider != "local")
-                    )
-                    _check_cancel()
-                    sso = client.obtain_session_via_password(
-                        email=email,
-                        password=password,
-                        turnstile_token=signin_turnstile,
-                        referer=signin_url,
-                        retries=1,
-                    )
-                    last_login_error = dict(
-                        getattr(client, "_last_create_session_error", {}) or {}
-                    )
-                except (ctx._RegPaused, ctx._RegCancelled):
-                    raise
-                except Exception as login_err:  # noqa: BLE001
-                    last_login_error = {"message": str(login_err)}
-                    print(
-                        f"[grok-build-auth] CreateSession attempt "
-                        f"{login_attempt} failed: {login_err}"
-                    )
-                if sso:
-                    break
-
-                login_message = str(last_login_error.get("message") or "").lower()
-                if "turnstile" in login_message:
-                    update(
-                        "fetching_sso",
-                        "登录验证令牌未通过，正在重新获取验证令牌",
-                    )
-                elif (
-                    "invalid-credentials" in login_message
-                    or "email or password" in login_message
-                ):
-                    update(
-                        "fetching_sso",
-                        "账号已创建，但登录凭证尚未生效，等待上游同步",
-                    )
-
-            if not sso:
-                sess["sso_login_error"] = last_login_error
-            print(
-                f"[grok-build-auth] CreateSession fallback sso="
-                f"{(sso[:60] if sso else None)}"
-            )
-
-        print(f"[grok-build-auth] fetch_sso_token result: {sso[:60] if sso else None}")
-        sess["sso"] = sso
-        session_cookies = extract_cookies_from_auth_client(client)
-        print(
-            f"[grok-build-auth] session cookies after signup: "
-            f"{sorted((session_cookies or {}).keys())}"
-        )
-        if sso:
-            session_cookies = dict(session_cookies or {})
-            session_cookies["sso"] = sso
-            session_cookies["sso-rw"] = sso
-
-        if not sso:
-            login_error = dict(sess.get("sso_login_error") or {})
-            login_message = str(login_error.get("message") or "")
-            if "turnstile" in login_message.lower():
-                failure_summary = "登录 Turnstile 校验失败"
-            elif (
-                "invalid-credentials" in login_message.lower()
-                or "email or password" in login_message.lower()
-            ):
-                failure_summary = "账号创建成功，但注册密码尚未被上游登录服务接受"
-            else:
-                failure_summary = "账号创建成功，但登录会话尚未生效"
-            raise RuntimeError(
-                f"{failure_summary}。SSO_COOKIE_MISSING after create_account. "
-                f"adapter_build={ctx.ADAPTER_BUILD}; HTTP {http_status}; "
-                f"create_ok={bool(getattr(res, 'ok', False))}; "
-                f"signup_error={signup_err!r}; set_cookies={len(sc)}; "
-                f"cookie_keys={sorted((session_cookies or {}).keys())}; "
-                f"login_grpc={login_error.get('grpc_status')!r}; "
-                f"login_error={login_message!r}; "
-                f"body_preview={rsc_preview!r}. "
-                "Account may have been created, but neither RSC set-cookie chain "
-                "nor CreateSession password fallback produced an sso cookie. "
-                "Common causes: turnstile_failed, rate_limited, or account not yet "
-                "visible to CreateSession."
-            )
-
         session_dir = ctx.RUNTIME_DATA_DIR / "register_sso"
         session_dir.mkdir(parents=True, exist_ok=True)
-        session_file = session_dir / f"{sid}.protocol-session.json"
+        session_file = session_dir / f"{sid}.protocol-registration.json"
         session_file.write_text(
             ctx.json.dumps(
                 {
                     "email": email,
-                    "sso": sso,
-                    "cookies": session_cookies,
-                    "source": "xai-protocol",
+                    "source": "xai-semi-protocol",
+                    "create_account_http": http_status,
                     "created_at": ctx._now(),
                 },
                 ensure_ascii=False,
@@ -660,19 +495,7 @@ def _run_registration(
             ),
             encoding="utf-8",
         )
-        sess["session_file"] = str(session_file)
 
-        # Keep registration on the HTTP protocol path, but perform the user-facing
-        # Device Allow action in a real browser carrying the newly created session.
-        update(
-            "authorizing",
-            f"协议注册成功，正在启动浏览器完成 Device Allow [{ctx.ADAPTER_BUILD}]",
-            session_file=str(session_file),
-        )
-        import sso_to_auth_json as sso_import
-        from xai_browser import XaiVisibleRegistration
-
-        _check_cancel()
         pipeline_cfg = dict(sess.get("_post_registration") or {})
         headless = bool(sess.get("_headless", True))
         step_delay_ms = max(
@@ -686,64 +509,103 @@ def _run_registration(
         def _browser_progress(message: str) -> None:
             update("authorizing", message)
 
+        from xai_browser import XaiVisibleRegistration
+
         browser_session = XaiVisibleRegistration(
             proxy=ctx._proxy_for_browser(proxy) if proxy else None,
             headless=headless,
             on_progress=_browser_progress,
             should_cancel=_browser_should_cancel,
             operation_delay_ms=step_delay_ms,
-            timeout_sec=180.0,
+            timeout_sec=300.0,
         )
-        browser_session.open_authorization(
-            session_cookies,
-            email=email,
-            password=password,
-            force_full_login=True,
+        browser_session.login_for_pkce(email, password)
+
+        output_target = str(
+            pipeline_cfg.get("output_format")
+            or pipeline_cfg.get("target")
+            or "cpa"
+        ).strip().lower()
+        output_target = output_target if output_target in {"cpa", "sub2api"} else "cpa"
+        output_format = "sub2api" if output_target == "sub2api" else "cpa"
+        output_format_label = "Sub2API JSON" if output_format == "sub2api" else "CPA JSON"
+        auto_import_enabled = bool(pipeline_cfg.get("auto_import_enabled"))
+        pre_import_probe_enabled = bool(
+            pipeline_cfg.get("pre_import_probe_enabled", True)
         )
-        conversion_failure: dict[str, Any] = {}
-        token = sso_import.sso_to_token_with_browser(
-            sso,
-            browser_session.authorize_device,
-            failure=conversion_failure,
-            should_cancel=_check_cancel,
+        update(
+            "importing",
+            "自然登录完成，正在生成本地 xAI PKCE 会话",
+            session_file=str(session_file),
+            registration_json_format=output_format,
         )
-        _check_cancel()
+
+        from xai_pkce import (
+            authorize_and_exchange,
+            http_timeout,
+            proxy_kwargs,
+            token_to_auth_payload,
+        )
+
+        pkce_file = ctx.RUNTIME_DATA_DIR / "pkce_sessions" / f"{sid}.json"
+        pkce_messages = {
+            "session_created": "本地 PKCE 会话已生成，正在浏览器中完成 xAI OAuth 授权",
+            "callback_captured": "已取得 xAI OAuth 授权码，正在本地兑换 AT/RT",
+            "token_exchanged": "本地 AT/RT 兑换完成",
+        }
+
+        def _on_pkce_progress(stage: str) -> None:
+            update(
+                "importing",
+                pkce_messages.get(stage, f"xAI OAuth：{stage}"),
+                registration_json_format=output_format,
+                pkce_session_file=str(pkce_file),
+            )
+
+        from xai_browser import XaiOAuthAccessDenied
+
+        token = None
+        for oauth_attempt in range(1, 3):
+            try:
+                token = authorize_and_exchange(
+                    browser_session.authorize_pkce,
+                    session_path=pkce_file,
+                    should_cancel=_check_cancel,
+                    on_progress=_on_pkce_progress,
+                    proxy_kwargs=proxy_kwargs(proxy),
+                    timeout=http_timeout(),
+                )
+                break
+            except XaiOAuthAccessDenied as oauth_error:
+                if oauth_attempt >= 2:
+                    raise RuntimeError(
+                        "半协议账号已创建并能正常登录，但 xAI OAuth 连续两次拒绝生成授权码。"
+                        "当前协议创建请求未携带浏览器 Castle 设备指纹，无法生成可导入的 AT/RT；"
+                        "请改用浏览器注册链路"
+                    ) from oauth_error
+                update(
+                    "authorizing",
+                    "首次 xAI OAuth 授权被拒绝，正在同步账户会话并生成全新 PKCE 重试",
+                    registration_json_format=output_format,
+                )
+                browser_session.prepare_pkce_retry()
         if (
             not token
             or not str(token.get("access_token") or "").strip()
             or not str(token.get("refresh_token") or "").strip()
         ):
-            stage = str(conversion_failure.get("stage") or "device_flow")
-            detail = str(conversion_failure.get("detail") or "未返回完整 AT/RT")
-            raise RuntimeError(
-                f"浏览器 Device Allow 后未取得完整 AT/RT：{stage}；{detail}；"
-                "已保存协议会话，可稍后重试"
-            )
-        _key, entry = sso_import.token_to_auth_entry(token, email=email)
-        auth_payload = {
-            "key": entry["key"],
-            "access_token": token.get("access_token", ""),
-            "auth_mode": entry.get("auth_mode", "oidc"),
-            "email": entry.get("email") or email,
-            "refresh_token": entry.get("refresh_token", ""),
-            "id_token": token.get("id_token", ""),
-            "token_type": token.get("token_type", "Bearer"),
-            "expires_in": token.get("expires_in"),
-            "expires_at": entry.get("expires_at"),
-            "scope": token.get("scope", ""),
-            "oidc_issuer": entry.get("oidc_issuer", "https://auth.x.ai"),
-            "oidc_client_id": entry.get("oidc_client_id", ""),
-            "sso": sso,
-            "password": password,
-        }
-        output_target = (
-            str(
-                pipeline_cfg.get("output_format") or pipeline_cfg.get("target") or "cpa"
-            )
-            .strip()
-            .lower()
+            raise RuntimeError("半协议本地 PKCE 兑换未返回完整 AT/RT")
+
+        auth_payload = token_to_auth_payload(token, email=email)
+        auth_payload["password"] = password
+
+        import accounts
+
+        update(
+            "converting",
+            f"正在转换 {output_format_label}",
+            registration_json_format=output_format,
         )
-        output_format = "sub2api" if output_target == "sub2api" else "cpa"
         import_result = accounts.import_auth_payload(
             auth_payload,
             merge=True,
@@ -751,41 +613,40 @@ def _run_registration(
         )
         if not import_result.get("ok"):
             raise RuntimeError(
-                f"SSO account import failed: {import_result.get('error')}; "
-                f"adapter_build={ctx.ADAPTER_BUILD}"
-            )
-            # Standalone build persists one auth file per account plus data/auth.json.
-        if import_result.get("storage") != "filesystem":
-            print(
-                f"[grok-build-auth] WARN: unexpected standalone import storage="
-                f"{import_result.get('storage')}"
+                f"xAI auth 导入本地账户池失败：{import_result.get('error')}"
             )
         imported_rows = [
-            x for x in (import_result.get("imported") or []) if isinstance(x, dict)
+            row
+            for row in (import_result.get("imported") or [])
+            if isinstance(row, dict)
         ]
-        imported_ids = [str(x.get("id")) for x in imported_rows if x.get("id")]
+        imported_ids = [str(row.get("id")) for row in imported_rows if row.get("id")]
         imported_accounts = [
-            {"id": x.get("id"), "email": x.get("email") or email}
-            for x in imported_rows
-            if x.get("id") or x.get("email")
+            {"id": row.get("id"), "email": row.get("email") or email}
+            for row in imported_rows
+            if row.get("id") or row.get("email")
         ]
-        sess["auth_json"] = import_result
-        sess["imported_account_ids"] = imported_ids
-        sess["imported_accounts"] = imported_accounts
-        sess["oauth"] = {
-            "path": "protocol_browser_device_authorization",
-            "access_token": (token.get("access_token") or "")[:20] + "...",
-            "refresh_token": bool(token.get("refresh_token")),
-            "email": email,
-        }
+        with ctx._lock:
+            current = ctx._sessions.get(sid) or sess
+            current["auth_json"] = import_result
+            current["imported_account_ids"] = imported_ids
+            current["imported_accounts"] = imported_accounts
+            current["oauth"] = {
+                "path": "semi_protocol_local_authorization_code_pkce",
+                "access_token": (token.get("access_token") or "")[:20] + "...",
+                "refresh_token": bool(token.get("refresh_token")),
+                "email": email,
+                "pkce_session_file": str(pkce_file),
+            }
+            current["session_file"] = str(session_file)
+            current["registration_json_format"] = output_format
+            current["updated_at"] = ctx._now()
+            ctx._sessions[sid] = current
+            ctx._mirror_reg_sess(sid, current)
         update(
             "converted",
-            f"{output_format.upper()} JSON 转换完成，已写入本地账户池",
+            f"{output_format_label} 转换完成，已写入本地账户池",
             registration_json_format=output_format,
-        )
-        auto_import_enabled = bool(pipeline_cfg.get("auto_import_enabled"))
-        pre_import_probe_enabled = bool(
-            pipeline_cfg.get("pre_import_probe_enabled", True)
         )
         if not auto_import_enabled:
             ctx._finish_pipeline_without_import(sid, pipeline_cfg)

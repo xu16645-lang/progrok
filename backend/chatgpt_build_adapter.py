@@ -16,14 +16,14 @@ Registration flow per account:
 
 from __future__ import annotations
 
-import json
+import json  # noqa: F401 - exposed through RegistrationContext(globals())
 import os
 import secrets
 import string
-import sys
+import sys  # noqa: F401 - exposed through RegistrationContext(globals())
 import threading
 import time
-import uuid
+import uuid  # noqa: F401 - exposed through RegistrationContext(globals())
 from pathlib import Path
 from typing import Any
 
@@ -33,7 +33,7 @@ from chatgpt_registration import history as _history
 from chatgpt_registration import operations as _operations
 from chatgpt_registration import probe as _probe
 from chatgpt_registration import worker as _worker
-from registration_state import clear_state, load_state, save_state
+from registration_state import clear_state, load_state, save_state  # noqa: F401
 
 BACKEND_DIR = Path(__file__).resolve().parent
 APP_DIR = BACKEND_DIR.parent
@@ -278,12 +278,13 @@ def _make_email_receiver(
     expiry_ms: int | None = None,
     mail_provider: str | None = None,
     hotmail_local_base_url: str | None = None,
+    should_cancel: Any | None = None,
 ):
     """Create a temporary email mailbox for receiving ChatGPT verification codes."""
     if str(mail_provider or "").strip().lower() == "hotmail_local":
         from hotmail_local import create_receiver
 
-        return create_receiver(hotmail_local_base_url)
+        return create_receiver(hotmail_local_base_url, should_cancel=should_cancel)
 
     from moemail import (
         create_mailbox,

@@ -4,6 +4,7 @@ import sys
 import tempfile
 import time
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -68,6 +69,42 @@ class AccountRotationTests(unittest.TestCase):
         self.assertNotIn("session_data", page["items"][0])
         self.assertNotIn("source_session_file", page["items"][0])
         self.assertTrue(self.state_path.exists())
+
+    def test_registration_history_groups_by_beijing_registration_date(self) -> None:
+        first = self.imported_session("first@example.com")
+        first_time = datetime(2026, 7, 24, 16, 30, tzinfo=timezone.utc).timestamp()
+        first["created_at"] = first_time - 30
+        first["updated_at"] = first_time + 30
+        first["events"] = [
+            {"at": first_time, "status": "completion", "message": "registration complete"},
+            {"at": first_time + 20, "status": "imported", "message": "导入成功"},
+        ]
+        second = self.imported_session("second@example.com")
+        second_time = datetime(2026, 7, 23, 18, 0, tzinfo=timezone.utc).timestamp()
+        second["created_at"] = second_time - 30
+        second["updated_at"] = second_time + 30
+        second["events"] = [
+            {"at": second_time, "status": "completion", "message": "registration complete"},
+            {"at": second_time + 20, "status": "imported", "message": "导入成功"},
+        ]
+
+        account_rotation.record_imported_session("xai", first)
+        account_rotation.record_imported_session("chatgpt", second)
+
+        history = account_rotation.list_registration_history()
+        self.assertEqual(
+            history["items"],
+            [
+                {"date": "2026-07-25", "count": 1, "xai": 1, "chatgpt": 0},
+                {"date": "2026-07-24", "count": 1, "xai": 0, "chatgpt": 1},
+            ],
+        )
+        self.assertEqual(
+            account_rotation.registration_history_emails("2026-07-25"),
+            {"first@example.com"},
+        )
+        with self.assertRaisesRegex(ValueError, "YYYY-MM-DD"):
+            account_rotation.registration_history_emails("25/07/2026")
 
     def test_rotation_state_retries_transient_windows_replace_lock(self) -> None:
         real_replace = account_rotation.os.replace

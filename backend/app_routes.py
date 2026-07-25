@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app_context import AppContext
 
 
 def get_config(ctx):
@@ -100,6 +99,13 @@ def hotmail_probe_all(ctx, request):
     return result
 
 
+def hotmail_reset_health(ctx):
+    from hotmail_local import list_accounts, reset_healthy_accounts
+
+    reset = reset_healthy_accounts()
+    return {"ok": True, "reset": reset, "pool": list_accounts()}
+
+
 def hotmail_probe_one(ctx, account_id, request):
     from hotmail_local import list_accounts, probe_account
 
@@ -114,10 +120,19 @@ def hotmail_probe_one(ctx, account_id, request):
 
 
 def hotmail_set_status(ctx, account_id, request):
-    from hotmail_local import list_accounts, set_used
+    from hotmail_local import list_accounts, set_preferred_account, set_used
 
-    if not set_used(account_id, request.used):
-        raise ctx.HTTPException(status_code=404, detail="邮箱账号不存在")
+    try:
+        if request.preferred_for_next_use is True:
+            if not set_preferred_account(account_id):
+                raise ctx.HTTPException(status_code=404, detail="邮箱账号不存在")
+        elif request.used is not None:
+            if not set_used(account_id, request.used):
+                raise ctx.HTTPException(status_code=404, detail="邮箱账号不存在")
+        else:
+            raise ctx.HTTPException(status_code=400, detail="没有可更新的邮箱状态")
+    except RuntimeError as exc:
+        raise ctx.HTTPException(status_code=409, detail=str(exc)) from exc
     return {"ok": True, "pool": list_accounts()}
 
 
@@ -165,9 +180,6 @@ def start_register(ctx, settings=None, paused=False):
     requested_target = str(cfg.get("registration_target") or "grok").strip().lower()
     if requested_target == "chatgpt":
         raise ctx.HTTPException(status_code=400, detail="ChatGPT 注册暂时停用")
-    registration_mode = str(cfg.get("registration_mode") or "browser").lower()
-    if registration_mode == "protocol":
-        raise ctx.HTTPException(status_code=400, detail="半协议注册暂时停用")
     cfg["registration_mode"] = "browser"
     selected_format = str(
         cfg.get("registration_json_format") or cfg.get("auto_import_target") or "cpa"
@@ -182,7 +194,9 @@ def start_register(ctx, settings=None, paused=False):
     if cfg.get("mail_provider") == "hotmail_local":
         from hotmail_local import list_accounts
 
-        available = int(list_accounts().get("available") or 0)
+        pool = list_accounts()
+        available = int(pool.get("available") or 0)
+        available_accounts = int(pool.get("available_accounts") or 0)
         if available < 1:
             raise ctx.HTTPException(
                 status_code=400, detail="微软邮箱账户池没有可用邮箱，请先导入或恢复邮箱"
@@ -191,6 +205,9 @@ def start_register(ctx, settings=None, paused=False):
         if requested_count < 1:
             raise ctx.HTTPException(status_code=400, detail="注册数量必须大于 0")
         cfg["count"] = min(requested_count, available)
+        cfg["concurrency"] = min(
+            max(1, available_accounts), max(1, int(cfg.get("concurrency") or 1))
+        )
     elif int(cfg.get("count") or 0) < 1:
         raise ctx.HTTPException(status_code=400, detail="注册数量必须大于 0")
     cfg["concurrency"] = min(

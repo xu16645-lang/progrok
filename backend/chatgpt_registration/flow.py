@@ -47,6 +47,7 @@ def _prepare_registration_session(
             expiry_ms=expiry_ms,
             mail_provider=mail_provider,
             hotmail_local_base_url=hotmail_local_base_url,
+            should_cancel=should_cancel,
         )
     except Exception as e:
         return {"ok": False, "error": str(e)}
@@ -366,7 +367,7 @@ def _batch_spawner(
     headless,
 ):
     """Spawn registration jobs for a batch, respecting concurrency limits."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor
 
     with ctx._lock:
         b = ctx._batches.get(batch_id) or {}

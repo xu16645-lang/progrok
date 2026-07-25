@@ -8,7 +8,7 @@ import httpx
 from account_pipeline_parts import cpa as _cpa
 from account_pipeline_parts import grok_probe as _grok_probe
 from account_pipeline_parts import sub2api as _sub2api
-from account_pipeline_parts.common import (
+from account_pipeline_parts.common import (  # noqa: F401 - compatibility facade
     CHATGPT_SUB2API_MODELS,
     DEFAULT_PROBE_MODEL,
     PROBE_MODELS_TIMEOUT,
@@ -16,7 +16,7 @@ from account_pipeline_parts.common import (
     PROBE_RESPONSE_TIMEOUT,
     PROBE_TRANSIENT_STATUS_CODES,
 )
-from export_formats import CPA_BASE_URL
+from export_formats import CPA_BASE_URL  # noqa: F401 - compatibility facade
 
 
 # Private aliases remain available for existing callers while their owning
@@ -29,8 +29,6 @@ _lightweight_probe = _grok_probe._lightweight_probe
 _sub2api_auth_headers = _sub2api._sub2api_auth_headers
 _chatgpt_agent_identity = _sub2api._chatgpt_agent_identity
 _find_sub2api_account = _sub2api._find_sub2api_account
-create_grok_oauth_in_sub2api = _sub2api.create_grok_oauth_in_sub2api
-import_grok_sso_to_sub2api = _sub2api.import_grok_sso_to_sub2api
 probe_grok_account_in_sub2api = _sub2api.probe_grok_account_in_sub2api
 
 

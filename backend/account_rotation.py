@@ -7,6 +7,7 @@ import threading
 import time
 import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 
@@ -15,6 +16,7 @@ APP_DIR = Path(__file__).resolve().parent.parent
 STATE_PATH = APP_DIR / "runtime" / "data" / "account_rotation.json"
 AUTO_POLL_INTERVAL_SECONDS = 30 * 60
 MAX_PROBE_WORKERS = 10
+HISTORY_TIMEZONE = timezone(timedelta(hours=8))
 
 _lock = threading.RLock()
 _poll_lock = threading.Lock()
@@ -317,6 +319,55 @@ def list_records(
                 "last_auto_run_at": _meta.get("last_auto_run_at"),
                 "next_auto_run_at": next_auto_run_at,
             },
+        }
+
+
+def _registration_date(record: dict[str, Any]) -> str:
+    timestamp = _as_timestamp(record.get("registered_at"), 0)
+    if not timestamp:
+        return ""
+    return datetime.fromtimestamp(timestamp, HISTORY_TIMEZONE).date().isoformat()
+
+
+def list_registration_history() -> dict[str, Any]:
+    """Summarize durable imported registrations by local registration date."""
+    with _lock:
+        _load_locked()
+        grouped: dict[str, dict[str, Any]] = {}
+        for record in _records.values():
+            date = _registration_date(record)
+            email = _text(record.get("email"), 320).lower()
+            if not date or not email or email == "未记录邮箱":
+                continue
+            item = grouped.setdefault(
+                date,
+                {"date": date, "count": 0, "xai": 0, "chatgpt": 0},
+            )
+            item["count"] += 1
+            account_type = str(record.get("account_type") or "xai").lower()
+            item["chatgpt" if account_type == "chatgpt" else "xai"] += 1
+        return {
+            "ok": True,
+            "items": [grouped[date] for date in sorted(grouped, reverse=True)],
+        }
+
+
+def registration_history_emails(history_date: str) -> set[str]:
+    """Return unique account emails registered on one YYYY-MM-DD date."""
+    try:
+        normalized_date = datetime.strptime(
+            str(history_date or "").strip(), "%Y-%m-%d"
+        ).date().isoformat()
+    except ValueError as exc:
+        raise ValueError("历史日期格式无效，应为 YYYY-MM-DD") from exc
+    with _lock:
+        _load_locked()
+        return {
+            _text(record.get("email"), 320).lower()
+            for record in _records.values()
+            if _registration_date(record) == normalized_date
+            and _text(record.get("email"), 320)
+            and _text(record.get("email"), 320) != "未记录邮箱"
         }
 
 

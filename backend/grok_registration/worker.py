@@ -109,6 +109,7 @@ def _run_registration(
             ctx.json.dumps(
                 {
                     "email": email,
+                    "password": password,
                     "sso": sso,
                     "cookies": cookies,
                     "source": "xai-browser",
@@ -140,68 +141,58 @@ def _run_registration(
             or "cpa"
         ).strip().lower()
         output_target = output_target if output_target in {"cpa", "sub2api"} else "cpa"
+        auto_import_enabled = bool(pipeline_cfg.get("auto_import_enabled"))
+        pre_import_probe_enabled = bool(
+            pipeline_cfg.get("pre_import_probe_enabled", True)
+        )
+
         output_format_label = "CPA JSON" if output_target == "cpa" else "Sub2API JSON"
         update(
             "importing",
-            f"正在浏览器中完成 xAI OAuth 设备授权，随后转换 {output_format_label}",
+            "正在生成本地 xAI PKCE 会话",
             registration_json_format=output_target,
         )
-        import sso_to_auth_json as sso_import
+        from xai_pkce import (
+            authorize_and_exchange,
+            http_timeout,
+            proxy_kwargs,
+            token_to_auth_payload,
+        )
 
-        conversion_failure: dict[str, Any] = {}
-        token = sso_import.sso_to_token_with_browser(
-            sso,
-            browser_session.authorize_device,
-            failure=conversion_failure,
+        pkce_file = ctx.RUNTIME_DATA_DIR / "pkce_sessions" / f"{sid}.json"
+        pkce_messages = {
+            "session_created": "本地 PKCE 会话已生成，正在浏览器中完成 xAI OAuth 授权",
+            "callback_captured": "已捕获 xAI OAuth 回调，正在本地兑换 AT/RT",
+            "token_exchanged": "本地 AT/RT 兑换完成",
+        }
+
+        def _on_pkce_progress(stage: str) -> None:
+            update(
+                "importing",
+                pkce_messages.get(stage, f"xAI OAuth：{stage}"),
+                registration_json_format=output_target,
+                pkce_session_file=str(pkce_file),
+            )
+
+        token = authorize_and_exchange(
+            browser_session.authorize_pkce,
+            session_path=pkce_file,
             should_cancel=_check_cancel,
+            on_progress=_on_pkce_progress,
+            proxy_kwargs=proxy_kwargs(proxy),
+            timeout=http_timeout(),
         )
         if (
             not token
             or not str(token.get("access_token") or "").strip()
             or not str(token.get("refresh_token") or "").strip()
         ):
-            stage_labels = {
-                "device_code": "设备码申请",
-                "verify": "设备授权验证",
-                "approve": "浏览器授权确认",
-                "token_poll": "令牌获取",
-            }
-            reason_labels = {
-                "rate_limited": "上游限流",
-                "network_timeout": "网络超时",
-                "invalid_sso": "SSO 已失效",
-                "upstream_rejected": "上游拒绝请求",
-            }
-            stage = str(conversion_failure.get("stage") or "device_flow")
-            reason = str(
-                conversion_failure.get("reason") or "upstream_rejected"
-            )
-            detail = str(conversion_failure.get("detail") or "未返回可用令牌")
-            if conversion_failure.get("retryable"):
-                ctx._note_reg_pressure(f"browser device-flow {reason}", pause_sec=10)
             raise RuntimeError(
-                "浏览器 OAuth 转换失败："
-                f"{stage_labels.get(stage, stage)}（{reason_labels.get(reason, reason)}）；"
-                f"上游信息：{detail}；原始 Session 已保留"
+                "本地 xAI PKCE 兑换未返回完整 AT/RT；原始 Session 已保留"
             )
 
-        _key, entry = sso_import.token_to_auth_entry(token, email=email)
-        auth_payload = {
-            "key": entry["key"],
-            "access_token": token.get("access_token", ""),
-            "auth_mode": entry.get("auth_mode", "oidc"),
-            "email": entry.get("email") or email,
-            "refresh_token": entry.get("refresh_token", ""),
-            "id_token": token.get("id_token", ""),
-            "token_type": token.get("token_type", "Bearer"),
-            "expires_in": token.get("expires_in"),
-            "expires_at": entry.get("expires_at"),
-            "scope": token.get("scope", ""),
-            "oidc_issuer": entry.get("oidc_issuer", "https://auth.x.ai"),
-            "oidc_client_id": entry.get("oidc_client_id", ""),
-            "sso": sso,
-            "password": password,
-        }
+        auth_payload = token_to_auth_payload(token, email=email)
+        auth_payload["password"] = password
 
         import accounts
 
@@ -237,10 +228,11 @@ def _run_registration(
             current["imported_account_ids"] = imported_ids
             current["imported_accounts"] = imported_accounts
             current["oauth"] = {
-                "path": "browser_device_authorization",
+                "path": "local_authorization_code_pkce",
                 "access_token": (token.get("access_token") or "")[:20] + "...",
                 "refresh_token": bool(token.get("refresh_token")),
                 "email": email,
+                "pkce_session_file": str(pkce_file),
             }
             current["registration_json_format"] = output_format
             current["updated_at"] = ctx._now()
@@ -250,10 +242,6 @@ def _run_registration(
             "converted",
             f"{output_format_label} 转换完成，已写入本地账户池",
             registration_json_format=output_format,
-        )
-        auto_import_enabled = bool(pipeline_cfg.get("auto_import_enabled"))
-        pre_import_probe_enabled = bool(
-            pipeline_cfg.get("pre_import_probe_enabled", True)
         )
         if not auto_import_enabled:
             ctx._finish_pipeline_without_import(sid, pipeline_cfg)

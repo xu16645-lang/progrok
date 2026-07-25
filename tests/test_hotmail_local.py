@@ -77,7 +77,9 @@ class HotmailLocalTests(unittest.TestCase):
         second = hotmail_local.reserve_account()
         # Prefer different physical mailboxes under concurrency.
         self.assertNotEqual(first["id"], second["id"])
+        self.assertEqual(hotmail_local.list_accounts()["available_accounts"], 0)
         hotmail_local.release_account(first["id"], alias_index=first["alias_index"])
+        self.assertEqual(hotmail_local.list_accounts()["available_accounts"], 1)
         again = hotmail_local.reserve_account()
         self.assertEqual(again["id"], first["id"])
         self.assertEqual(again["alias_index"], first["alias_index"])
@@ -144,24 +146,23 @@ class HotmailLocalTests(unittest.TestCase):
         self.assertNotEqual(first["id"], second["id"])
         self.assertEqual(first["alias_index"], 0)
         self.assertEqual(second["alias_index"], 0)
-        third = hotmail_local.reserve_account()
-        self.assertIn(third["id"], {first["id"], second["id"]})
-        self.assertEqual(third["alias_index"], 1)
+        with self.assertRaisesRegex(RuntimeError, "没有可用账号"):
+            hotmail_local.reserve_account()
         hotmail_local.release_account(first["id"], alias_index=first["alias_index"])
         hotmail_local.release_account(second["id"], alias_index=second["alias_index"])
-        hotmail_local.release_account(third["id"], alias_index=third["alias_index"])
 
-    def test_same_mailbox_aliases_only_after_all_idle_mailboxes_are_busy(self):
+    def test_same_mailbox_aliases_are_serialized(self):
         hotmail_local.import_accounts(
             "a@outlook.com----p----client-a----token-a"
         )
         first = hotmail_local.reserve_account()
+        with self.assertRaisesRegex(RuntimeError, "没有可用账号"):
+            hotmail_local.reserve_account()
+        self.assertEqual(first["alias_index"], 0)
+        hotmail_local.mark_used(first["id"], alias_index=0)
         second = hotmail_local.reserve_account()
         self.assertEqual(first["id"], second["id"])
-        self.assertNotEqual(first["registration_email"], second["registration_email"])
-        self.assertEqual(first["alias_index"], 0)
         self.assertEqual(second["alias_index"], 1)
-        hotmail_local.mark_used(first["id"], alias_index=0)
         hotmail_local.mark_used(second["id"], alias_index=1)
         third = hotmail_local.reserve_account()
         self.assertEqual(third["registration_email"], "a+2@outlook.com")
@@ -436,7 +437,9 @@ class HotmailLocalTests(unittest.TestCase):
             "a@outlook.com----p----client-a----token-0"
         )
         first = hotmail_local.reserve_account()
-        second = hotmail_local.reserve_account()
+        second = dict(first)
+        second["alias_index"] = 1
+        second["registration_email"] = "a+1@outlook.com"
         receiver_a = hotmail_local.HotmailLocalReceiver(first)
         receiver_b = hotmail_local.HotmailLocalReceiver(second)
         seen_tokens: list[str] = []
@@ -515,8 +518,15 @@ class HotmailLocalTests(unittest.TestCase):
             self.assertEqual(receiver.wait_for_code(timeout=1), "123456")
         self.assertEqual(payloads[0]["email"], "a@outlook.com")
         self.assertEqual(payloads[0]["recipientFilters"], ["a+1@outlook.com"])
-        self.assertEqual(payloads[0]["top"], 30)
+        self.assertEqual(payloads[0]["top"], 10)
         hotmail_local.mark_used(reserved["id"], alias_index=1)
+
+    def test_code_fetch_window_grows_with_mailbox_alias_concurrency(self):
+        account_id = "mailbox-a"
+        hotmail_local._reservations[account_id] = set(range(8))
+
+        self.assertEqual(hotmail_local._code_fetch_top(account_id), 20)
+        self.assertEqual(hotmail_local._code_fetch_top("single"), 10)
 
     def test_receiver_exposes_live_verification_code_state(self):
         hotmail_local.import_accounts(
@@ -553,8 +563,9 @@ class HotmailLocalTests(unittest.TestCase):
             "a@outlook.com----p----client-a----token-a"
         )
         first = hotmail_local.reserve_account()
-        second = hotmail_local.reserve_account()
-        holder = hotmail_local.HotmailLocalReceiver(first)
+        second = dict(first)
+        second["alias_index"] = 1
+        second["registration_email"] = "a+1@outlook.com"
         waiter = hotmail_local.HotmailLocalReceiver(second)
         token_lock = hotmail_local._account_token_lock(first["id"])
         self.assertTrue(token_lock.acquire(blocking=False))
@@ -586,7 +597,9 @@ class HotmailLocalTests(unittest.TestCase):
             "a@outlook.com----p----client-a----token-a"
         )
         first = hotmail_local.reserve_account()
-        second = hotmail_local.reserve_account()
+        second = dict(first)
+        second["alias_index"] = 1
+        second["registration_email"] = "a+1@outlook.com"
         waiter = hotmail_local.HotmailLocalReceiver(second)
         token_lock = hotmail_local._account_token_lock(first["id"])
         self.assertTrue(token_lock.acquire(blocking=False))
@@ -814,7 +827,8 @@ class HotmailLocalTests(unittest.TestCase):
             self.assertEqual(email, "a@outlook.com")
             self.assertEqual(receiver.wait_for_code(timeout=3), "123456")
             self.assertEqual(server.last_payload["clientId"], "client-a")
-            self.assertEqual(server.last_payload["refreshToken"], "token-a")
+            # Entry probe rotates the token before verification polling starts.
+            self.assertEqual(server.last_payload["refreshToken"], "rotated-token")
             self.assertFalse(server.last_payload["allowTimeFallback"])
             self.assertIn("openai", server.last_payload["requiredKeywords"])
             stored = json.loads(hotmail_local.ACCOUNTS_FILE.read_text(encoding="utf-8"))
@@ -822,6 +836,60 @@ class HotmailLocalTests(unittest.TestCase):
         finally:
             server.shutdown()
             server.server_close()
+
+    def test_preferred_account_is_used_once_then_round_robin_resumes(self):
+        result = hotmail_local.import_accounts(
+            "a@outlook.com----p----client-a----token-a\n"
+            "b@outlook.com----p----client-b----token-b"
+        )
+        pool = hotmail_local.list_accounts()
+        preferred = next(item for item in pool["accounts"] if item["email"] == "b@outlook.com")
+        self.assertTrue(hotmail_local.set_preferred_account(preferred["id"]))
+
+        first = hotmail_local.reserve_account()
+        self.assertEqual(first["email"], "b@outlook.com")
+        self.assertFalse(
+            any(item["preferred_for_next_use"] for item in hotmail_local.list_accounts()["accounts"])
+        )
+        hotmail_local.release_account(first["id"], alias_index=first["alias_index"])
+
+    def test_create_receiver_probes_unchecked_and_replaces_failed_mailbox(self):
+        hotmail_local.import_accounts(
+            "a@outlook.com----p----client-a----token-a\n"
+            "b@outlook.com----p----client-b----token-b"
+        )
+
+        def probe(account_id, _base_url=None):
+            email = next(
+                item["email"]
+                for item in hotmail_local.list_accounts()["accounts"]
+                if item["id"] == account_id
+            )
+            return {"ok": email == "b@outlook.com", "error": "凭证失效"}
+
+        with patch.object(hotmail_local, "probe_account", side_effect=probe) as mocked:
+            email, receiver = hotmail_local.create_receiver("http://helper.local")
+
+        self.assertEqual(email, "b@outlook.com")
+        self.assertEqual(receiver.email, "b@outlook.com")
+        self.assertEqual(mocked.call_count, 2)
+
+    def test_reset_healthy_accounts_returns_only_passed_rows_to_unchecked(self):
+        result = hotmail_local.import_accounts(
+            "a@outlook.com----p----client-a----token-a\n"
+            "b@outlook.com----p----client-b----token-b"
+        )
+        accounts = json.loads(hotmail_local.ACCOUNTS_FILE.read_text(encoding="utf-8"))
+        accounts[0]["mail_healthy"] = True
+        accounts[0]["mail_checked_at"] = time.time()
+        accounts[1]["mail_healthy"] = False
+        accounts[1]["mail_checked_at"] = time.time()
+        hotmail_local.ACCOUNTS_FILE.write_text(json.dumps(accounts), encoding="utf-8")
+
+        self.assertEqual(hotmail_local.reset_healthy_accounts(), 1)
+        pool = hotmail_local.list_accounts()
+        self.assertEqual(pool["unchecked"], 1)
+        self.assertEqual(pool["unhealthy"], 1)
 
     def test_xai_receiver_accepts_alphanumeric_code_and_uses_xai_filters(self):
         imported = hotmail_local.import_accounts(
@@ -891,6 +959,81 @@ class HotmailLocalTests(unittest.TestCase):
 
         self.assertEqual(result["access_token"], "access-token")
         self.assertEqual(result["token_endpoint"], "live")
+
+    def test_helper_reuses_access_token_during_code_polling(self):
+        with patch.object(
+            hotmail_helper,
+            "post_form",
+            return_value={"access_token": "cached-access", "expires_in": 3600},
+        ) as post_form:
+            first = hotmail_helper.refresh_access_token(
+                "cache-client", "cache-refresh", strategy_names=["live"]
+            )
+            second = hotmail_helper.refresh_access_token(
+                "cache-client", "cache-refresh", strategy_names=["live"]
+            )
+
+        self.assertEqual(first["access_token"], "cached-access")
+        self.assertEqual(second["access_token"], "cached-access")
+        post_form.assert_called_once()
+
+    def test_helper_coalesces_recent_mailbox_reads(self):
+        result = {
+            "messages": [],
+            "mailboxResults": [],
+            "token_payload": {"next_refresh_token": ""},
+            "transport": "imap",
+        }
+        with patch.object(
+            hotmail_helper, "_collect_messages_uncached", return_value=result
+        ) as collect:
+            first = hotmail_helper.collect_messages(
+                "cache@example.com", "client", "refresh", ["INBOX"], 30
+            )
+            second = hotmail_helper.collect_messages(
+                "cache@example.com", "client", "refresh", ["INBOX"], 30
+            )
+
+        self.assertEqual(first["transport"], "imap")
+        self.assertEqual(second["transport"], "imap")
+        collect.assert_called_once()
+
+    def test_helper_fetches_recent_imap_messages_in_one_round_trip(self):
+        class FakeIMAP:
+            def __init__(self):
+                self.fetch_calls = []
+
+            def search(self, *_args):
+                return "OK", [b"1 2 3"]
+
+            def fetch(self, message_set, query):
+                self.fetch_calls.append((message_set, query))
+                return "OK", [
+                    (b"2 (RFC822 {4}", b"mail-two"),
+                    b")",
+                    (b"3 (RFC822 {6}", b"mail-three"),
+                    b")",
+                ]
+
+            def logout(self):
+                return None
+
+        client = FakeIMAP()
+        with (
+            patch.object(hotmail_helper, "open_mailbox", return_value=client),
+            patch.object(hotmail_helper, "select_mailbox"),
+            patch.object(
+                hotmail_helper,
+                "normalize_message",
+                side_effect=lambda message_id, _raw, _mailbox: {"id": message_id},
+            ),
+        ):
+            result = hotmail_helper.fetch_messages(
+                "cache@example.com", "access-token", top=2
+            )
+
+        self.assertEqual(client.fetch_calls, [(b"3,2", "(RFC822)")])
+        self.assertEqual([item["id"] for item in result["messages"]], ["2", "3"])
 
     def test_helper_refresh_token_preserves_http_error_details(self):
         error = HTTPError(
@@ -962,6 +1105,87 @@ class HotmailLocalTests(unittest.TestCase):
         self.assertIn("刷新令牌失效", pool["accounts"][0]["mail_health_error"])
         with self.assertRaises(RuntimeError):
             hotmail_local.reserve_account()
+
+    def test_ensure_healthy_accounts_replenishes_after_failed_wave(self):
+        unknown = [
+            {
+                "id": f"mail-{index}",
+                "mail_healthy": None,
+                "reserved": False,
+                "failed": False,
+                "remaining_uses": 10,
+            }
+            for index in range(6)
+        ]
+        pool_after_first_wave = {
+            "accounts": [
+                {
+                    **item,
+                    "mail_healthy": True if index == 0 else False if index < 4 else None,
+                }
+                for index, item in enumerate(unknown)
+            ]
+        }
+        pool_after_second_wave = {
+            "accounts": [
+                {
+                    **item,
+                    "mail_healthy": True if index in {0, 4} else False,
+                }
+                for index, item in enumerate(unknown)
+            ]
+        }
+        pools = [
+            {"accounts": unknown},
+            pool_after_first_wave,
+            pool_after_second_wave,
+        ]
+        with (
+            patch.object(hotmail_local, "list_accounts", side_effect=pools),
+            patch.object(
+                hotmail_local,
+                "probe_accounts",
+                side_effect=[
+                    {"results": [{"id": "mail-0", "ok": True}]},
+                    {"results": [{"id": "mail-4", "ok": True}]},
+                ],
+            ) as probe_accounts,
+        ):
+            result = hotmail_local.ensure_healthy_accounts(2, "http://helper.local")
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["healthy"], 2)
+        self.assertEqual(probe_accounts.call_count, 2)
+        self.assertEqual(probe_accounts.call_args_list[0].args[1], [
+            "mail-0",
+            "mail-1",
+            "mail-2",
+            "mail-3",
+        ])
+        self.assertEqual(probe_accounts.call_args_list[1].args[1], ["mail-4", "mail-5"])
+
+    def test_probe_accounts_stops_waiting_when_batch_is_paused(self):
+        worker_started = threading.Event()
+        release_worker = threading.Event()
+
+        def blocked_probe(account_id, _base_url):
+            worker_started.set()
+            release_worker.wait(timeout=2)
+            return {"ok": True, "account_id": account_id}
+
+        started = time.monotonic()
+        try:
+            with patch.object(hotmail_local, "probe_account", side_effect=blocked_probe):
+                result = hotmail_local.probe_accounts(
+                    account_ids=["mail-0"],
+                    should_cancel=worker_started.is_set,
+                )
+        finally:
+            release_worker.set()
+
+        self.assertTrue(result["cancelled"])
+        self.assertFalse(result["ok"])
+        self.assertLess(time.monotonic() - started, 0.75)
 
     def test_import_endpoint_automatically_probes_imported_accounts(self):
         request = app_module.HotmailImportRequest(

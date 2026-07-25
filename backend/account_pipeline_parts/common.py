@@ -1,7 +1,6 @@
 """Shared constants and response helpers for account pipeline protocols."""
 from __future__ import annotations
 
-from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
 import httpx

@@ -1,8 +1,8 @@
 """Adapter: xAI browser registration -> grokcli-2api account pool.
 
 1. register an x.ai account in an isolated browser context
-2. extract and preserve the browser SSO/session cookies
-3. approve the OAuth device request in the same browser context
+2. preserve the browser registration session for local authorization
+3. complete local Authorization Code + PKCE consent in the same browser context
 4. import the resulting auth entry into the multi-account pool
 
 Browser imports are deferred so the main API can still start when optional
@@ -14,14 +14,18 @@ from __future__ import annotations
 import json
 import os
 import sys
-import threading
+import threading  # noqa: F401 - exposed through RegistrationContext(globals())
 import time
-import uuid
+import uuid  # noqa: F401 - exposed through RegistrationContext(globals())
 from pathlib import Path
 from typing import Any
 
-from performance_tuning import AdaptiveRegistrationTuner, machine_profile, system_sample
-from registration_state import clear_state
+from performance_tuning import (  # noqa: F401 - RegistrationContext facade
+    AdaptiveRegistrationTuner,
+    machine_profile,
+    system_sample,
+)
+from registration_state import clear_state  # noqa: F401 - compatibility facade
 from grok_registration import batch as _batch
 from grok_registration import flow as _flow
 from grok_registration import import_control as _import_control
@@ -34,7 +38,7 @@ from grok_registration import protocol_worker as _protocol_worker
 from grok_registration import recovery as _recovery
 from grok_registration import solver as _solver
 from grok_registration import worker as _worker
-from grok_registration.state import (
+from grok_registration.state import (  # noqa: F401 - RegistrationContext facade
     DEFAULT_CONCURRENCY,
     MAX_CONCURRENCY,
     PROBE_RECHECK_DELAYS,
@@ -84,7 +88,7 @@ BACKEND_DIR = Path(__file__).resolve().parent
 APP_DIR = BACKEND_DIR.parent
 RUNTIME_DATA_DIR = APP_DIR / "runtime" / "data"
 GBA = APP_DIR / "vendor" / "grok-build-auth"
-ADAPTER_BUILD = "2026-07-24-sub2-oauth-callback-2"
+ADAPTER_BUILD = "2026-07-25-local-pkce-1"
 # Newly registered accounts often need a short settle window before probe.
 REGISTER_PROBE_DELAY_SEC = float(
     os.environ.get("GROK2API_REG_PROBE_DELAY_SEC", "30") or 30
@@ -297,6 +301,7 @@ def _make_email_receiver(
     expiry_ms: int | None = None,
     mail_provider: str | None = None,
     hotmail_local_base_url: str | None = None,
+    should_cancel: Any | None = None,
 ):
     return _mailbox.make_email_receiver(
         api_key=api_key,
@@ -307,6 +312,7 @@ def _make_email_receiver(
         mail_provider=mail_provider,
         hotmail_local_base_url=hotmail_local_base_url,
         cancelled_error=_RegCancelled,
+        should_cancel=should_cancel,
     )
 
 
@@ -535,7 +541,8 @@ def _run_registration(
     with context._lock:
         session = context._sessions.get(sid) or {}
     mode = str(
-        (session.get("_post_registration") or {}).get("registration_mode") or "browser"
+        (session.get("_post_registration") or {}).get("registration_mode")
+        or "browser"
     ).lower()
     if mode == "protocol":
         _protocol_worker._run_registration(

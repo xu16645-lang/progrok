@@ -129,9 +129,26 @@ if (-not $SolverUp) {
     $solver = Start-Process -FilePath $SolverPython -ArgumentList @(
         "api_solver.py", "--browser_type", "camoufox", "--thread", "$SolverThreads",
         "--proxy", "--host", "127.0.0.1", "--port", "5072"
-    ) -WorkingDirectory $SolverRoot -WindowStyle Hidden -PassThru
+    ) -WorkingDirectory $SolverRoot -WindowStyle Hidden `
+        -RedirectStandardOutput (Join-Path $LogDir "solver.out.log") `
+        -RedirectStandardError (Join-Path $LogDir "solver.err.log") -PassThru
     $solver.Id | Set-Content -LiteralPath (Join-Path $PidDir "solver.pid") -Encoding ascii
-    Write-Host "Turnstile Solver started: PID=$($solver.Id), port=5072 (prewarm, reuse_page, idle=$($env:TURNSTILE_IDLE_SEC)s)"
+    $SolverReady = $false
+    foreach ($attempt in 1..60) {
+        Start-Sleep -Seconds 1
+        try {
+            $health = Invoke-RestMethod -Uri "http://127.0.0.1:5072/health" -TimeoutSec 2
+            if ($null -ne $health) {
+                $SolverReady = $true
+                break
+            }
+        } catch {}
+        if ($solver.HasExited) { break }
+    }
+    if (-not $SolverReady) {
+        throw "Turnstile Solver failed to become ready. Check runtime\logs\solver.out.log and solver.err.log"
+    }
+    Write-Host "Turnstile Solver ready: PID=$($solver.Id), port=5072 (prewarm, reuse_page, idle=$($env:TURNSTILE_IDLE_SEC)s)"
 } else {
     Write-Host "Turnstile Solver already available on port 5072"
 }

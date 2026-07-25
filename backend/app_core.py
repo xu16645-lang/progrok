@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app_context import AppContext
 
 
 def load_config(ctx):
@@ -67,10 +66,7 @@ def load_config(ctx):
         # import and probe data remain available; only the registration target
         # is migrated back to Grok.
         data["registration_target"] = "grok"
-        registration_mode = str(data.get("registration_mode") or "browser").lower()
-        data["registration_mode"] = (
-            registration_mode if registration_mode in {"protocol", "browser"} else "browser"
-        )
+        data["registration_mode"] = "browser"
         selected_format = str(data.get("registration_json_format") or "cpa").lower()
         data["registration_json_format"] = (
             selected_format if selected_format in {"cpa", "sub2api"} else "cpa"
@@ -119,10 +115,7 @@ def save_config(ctx, data):
     )
     clean["auto_import_target"] = clean["registration_json_format"]
     clean["registration_target"] = "grok"
-    registration_mode = str(clean.get("registration_mode") or "browser").lower()
-    clean["registration_mode"] = (
-        registration_mode if registration_mode in {"protocol", "browser"} else "browser"
-    )
+    clean["registration_mode"] = "browser"
     clean["sub2api_chatgpt_models"] = list(ctx.CHATGPT_SUB2API_MODELS)
     with ctx._config_lock:
         ctx.CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -200,6 +193,7 @@ def _get_registration_adapter(ctx, target=None):
 
 def _post_registration_config(ctx, cfg):
     registration_target = str(cfg.get("registration_target") or "grok").strip().lower()
+    registration_mode = "browser"
     probe_model = (
         cfg.get("chatgpt_probe_model") or "gpt-5.5"
         if registration_target == "chatgpt"
@@ -208,13 +202,7 @@ def _post_registration_config(ctx, cfg):
     return {
         "model": probe_model,
         "registration_target": registration_target,
-        "registration_mode": (
-            str(cfg.get("registration_mode") or "browser").lower()
-            if registration_target == "grok"
-            and str(cfg.get("registration_mode") or "browser").lower()
-            in {"protocol", "browser"}
-            else "browser"
-        ),
+        "registration_mode": registration_mode,
         "step_delay_ms": int(cfg.get("chatgpt_step_delay_ms") or 0),
         "pipeline_concurrency": int(cfg.get("concurrency") or 1),
         "probe_concurrency": int(

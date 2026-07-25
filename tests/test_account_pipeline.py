@@ -12,8 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "backend"))
 
 from account_pipeline import (
     CHATGPT_SUB2API_MODELS,
-    create_grok_oauth_in_sub2api,
-    import_grok_sso_to_sub2api,
     import_account,
     import_chatgpt_to_sub2api,
     import_to_sub2api,
@@ -421,107 +419,6 @@ class Sub2APIImportTests(unittest.TestCase):
     def tearDown(self):
         sub2api_protocol._clear_sub2api_auth_cache()
 
-    def test_grok_oauth_callback_creates_account_directly_in_sub2api(self):
-        requests = []
-        authorized = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            requests.append(request)
-            if request.url.path.endswith("/oauth/auth-url"):
-                return httpx.Response(
-                    200,
-                    json={
-                        "data": {
-                            "auth_url": "https://auth.x.ai/oauth2/authorize?state=state-1",
-                            "session_id": "sub2-session-1",
-                            "state": "state-1",
-                        }
-                    },
-                    request=request,
-                )
-            return httpx.Response(
-                200,
-                json={"data": {"id": 88, "name": "grok@example.com"}},
-                request=request,
-            )
-
-        def authorize(url, state):
-            authorized.append((url, state))
-            return "http://127.0.0.1:56121/callback?code=code-1&state=state-1"
-
-        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            result = create_grok_oauth_in_sub2api(
-                authorize=authorize,
-                email="grok@example.com",
-                base_url="https://sub2.example.test",
-                auth_mode="api_key",
-                api_key="admin-key",
-                group_id=20,
-                client=client,
-            )
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["account_id"], 88)
-        self.assertEqual(
-            [request.url.path for request in requests],
-            [
-                "/api/v1/admin/grok/oauth/auth-url",
-                "/api/v1/admin/grok/oauth/create-from-oauth",
-            ],
-        )
-        self.assertEqual(
-            authorized,
-            [("https://auth.x.ai/oauth2/authorize?state=state-1", "state-1")],
-        )
-        create_body = json.loads(requests[1].content)
-        self.assertEqual(create_body["session_id"], "sub2-session-1")
-        self.assertEqual(create_body["concurrency"], 3)
-        self.assertEqual(create_body["group_ids"], [20])
-        self.assertIn("callback?code=code-1", create_body["code"])
-        self.assertNotIn("access_token", create_body)
-        self.assertNotIn("refresh_token", create_body)
-
-    def test_grok_sso_import_uses_native_sub2api_endpoint_and_group(self):
-        requests = []
-
-        def handler(request: httpx.Request) -> httpx.Response:
-            requests.append(request)
-            return httpx.Response(
-                200,
-                json={
-                    "data": {
-                        "created": [
-                            {
-                                "email": "grok@example.com",
-                                "account": {"id": 91, "name": "grok@example.com"},
-                            }
-                        ],
-                        "failed": [],
-                    }
-                },
-                request=request,
-            )
-
-        with httpx.Client(transport=httpx.MockTransport(handler)) as client:
-            result = import_grok_sso_to_sub2api(
-                sso_token="signed-sso",
-                email="grok@example.com",
-                base_url="https://sub2.example.test",
-                auth_mode="api_key",
-                api_key="admin-key",
-                group_id=20,
-                client=client,
-            )
-
-        self.assertTrue(result["ok"])
-        self.assertEqual(result["account_id"], 91)
-        self.assertEqual(result["path"], "grok_sso_to_oauth")
-        self.assertEqual(requests[0].url.path, "/api/v1/admin/grok/sso-to-oauth")
-        body = json.loads(requests[0].content)
-        self.assertEqual(body["sso_token"], "signed-sso")
-        self.assertEqual(body["concurrency"], 3)
-        self.assertEqual(body["group_ids"], [20])
-
     def test_callback_imported_grok_probe_uses_sub2api_account_test(self):
         requests = []
 
@@ -605,7 +502,10 @@ class Sub2APIImportTests(unittest.TestCase):
 
         sub2api_protocol._clear_sub2api_auth_cache()
         try:
-            with httpx.Client(transport=httpx.MockTransport(handler)) as client:
+            with (
+                patch.object(sub2api_protocol.time, "sleep") as sleep,
+                httpx.Client(transport=httpx.MockTransport(handler)) as client,
+            ):
                 result = probe_grok_account_in_sub2api(
                     88,
                     model="grok-4.5",
@@ -623,6 +523,64 @@ class Sub2APIImportTests(unittest.TestCase):
         self.assertTrue(result["retryable"])
         self.assertEqual(result["classification"], "rate_limited")
         self.assertEqual(result["status_code"], 429)
+        self.assertEqual(sleep.call_count, 3)
+
+    def test_password_login_retries_429_then_imports(self):
+        requests = []
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            requests.append(request)
+            login_count = sum(
+                item.url.path == "/api/v1/auth/login" for item in requests
+            )
+            if request.url.path == "/api/v1/auth/login" and login_count < 3:
+                return httpx.Response(
+                    429,
+                    headers={"Retry-After": "1"},
+                    json={"message": "Too many requests"},
+                    request=request,
+                )
+            if request.url.path == "/api/v1/auth/login":
+                return httpx.Response(
+                    200,
+                    json={"data": {"access_token": "admin-access"}},
+                    request=request,
+                )
+            return httpx.Response(
+                200,
+                json={"data": {"account_created": 1, "account_failed": 0}},
+                request=request,
+            )
+
+        sub2api_protocol._clear_sub2api_auth_cache()
+        try:
+            with (
+                patch.object(sub2api_protocol.time, "sleep") as sleep,
+                httpx.Client(transport=httpx.MockTransport(handler)) as client,
+            ):
+                result = import_to_sub2api(
+                    {
+                        "type": "xai",
+                        "email": "grok@example.test",
+                        "access_token": "at",
+                        "refresh_token": "rt",
+                    },
+                    base_url="https://sub2.example.test",
+                    auth_mode="password",
+                    admin_email="admin@example.test",
+                    admin_password="secret",
+                    client=client,
+                )
+        finally:
+            sub2api_protocol._clear_sub2api_auth_cache()
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(sleep.call_args_list[0].args, (1.0,))
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(
+            sum(item.url.path == "/api/v1/auth/login" for item in requests),
+            3,
+        )
 
     def test_agent_identity_uses_codex_session_group_and_fixed_models(self):
         requests = []

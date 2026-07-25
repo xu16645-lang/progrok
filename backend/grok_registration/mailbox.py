@@ -17,6 +17,7 @@ def make_email_receiver(
     mail_provider: str | None = None,
     hotmail_local_base_url: str | None = None,
     cancelled_error: type[Exception],
+    should_cancel: Any | None = None,
 ) -> tuple[str, Any]:
     """Create a mailbox receiver that extracts xAI verification codes."""
     if str(mail_provider or "").strip().lower() == "hotmail_local":
@@ -25,6 +26,7 @@ def make_email_receiver(
         return create_receiver(
             hotmail_local_base_url,
             verification_target="xai",
+            should_cancel=should_cancel,
         )
 
     from config import MOEMAIL_API_KEY, MOEMAIL_BASE_URL, MOEMAIL_DOMAIN, MOEMAIL_EXPIRY_MS

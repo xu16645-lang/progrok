@@ -254,11 +254,12 @@ def _spawn_batch_runner(
         # jobs in flight and submit the next one as soon as any slot completes.
         next_i = 1
         in_flight: dict[Any, int] = {}
+        mailbox_inflight_limit = workers
 
         def _max_inflight() -> int:
             if tuner.enabled:
-                return max(1, int(tuner.current_concurrency))
-            return max(1, workers)
+                return min(mailbox_inflight_limit, max(1, int(tuner.current_concurrency)))
+            return mailbox_inflight_limit
 
         def _batch_cancel_requested() -> bool:
             with ctx._lock:
@@ -352,6 +353,29 @@ def _spawn_batch_runner(
             name=f"gba-batch-lock-{bid[-8:]}",
         )
         renew_t.start()
+
+        if str(mail_provider or "").strip().lower() == "hotmail_local":
+            from hotmail_local import ensure_healthy_accounts
+
+            prepared_mailboxes = ensure_healthy_accounts(
+                workers,
+                hotmail_local_base_url,
+                should_cancel=lambda: _batch_cancel_requested()
+                or _batch_pause_requested(),
+            )
+            healthy_mailboxes = int(prepared_mailboxes.get("healthy") or 0)
+            mailbox_inflight_limit = min(workers, max(1, healthy_mailboxes))
+            with ctx._lock:
+                current = ctx._batches.get(bid)
+                if current is not None:
+                    current["mailbox_concurrency"] = healthy_mailboxes
+                    current["mailbox_preflight"] = prepared_mailboxes
+                    current["concurrency"] = mailbox_inflight_limit
+                    current["updated_at"] = ctx._now()
+                    current["message"] = (
+                        f"邮箱预测活完成：可并发物理邮箱 {healthy_mailboxes}/{workers}"
+                    )
+                    ctx._mirror_reg_batch(bid, dict(current))
 
         def _job(i: int) -> dict[str, Any]:
             # Honour batch-level stop before creating more mailboxes.

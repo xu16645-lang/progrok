@@ -81,3 +81,18 @@ def test_custom_https_keeps_cloudflare_compatibility() -> None:
         moemail.normalize_mail_provider("custom", base_url="https://mail.example.test")
         == "cfmail"
     )
+
+
+@patch("mail_protocols.imap_mail.random.choice", side_effect=lambda domains: domains[1])
+@patch("mail_protocols.imap_mail.imaplib.IMAP4_SSL", FakeImap)
+def test_custom_imaps_randomly_selects_from_domain_pool(choose) -> None:
+    mailbox = moemail.create_mailbox(
+        provider="custom",
+        name="random123",
+        domain="first.example.net, second.example.net; first.example.net",
+        base_url="imaps://mail.example.test:993/INBOX",
+        api_key="collector@example.net:secret:value",
+    )
+
+    assert mailbox["email"] == "random123@second.example.net"
+    choose.assert_called_once_with(["first.example.net", "second.example.net"])

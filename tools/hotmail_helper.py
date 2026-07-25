@@ -1,7 +1,8 @@
 import argparse
-import email
-import html
-import imaplib
+import copy
+import email  # noqa: F401 - exposed through MailboxContext(globals())
+import html  # noqa: F401 - exposed through MailboxContext(globals())
+import imaplib  # noqa: F401 - exposed through MailboxContext(globals())
 import json
 import os
 import re
@@ -13,11 +14,11 @@ import time
 import traceback
 from functools import partial
 from datetime import datetime, timezone
-from email.header import decode_header
-from email.utils import parseaddr, parsedate_to_datetime
+from email.header import decode_header  # noqa: F401
+from email.utils import parseaddr, parsedate_to_datetime  # noqa: F401
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.error import HTTPError, URLError
+from urllib.error import HTTPError, URLError  # noqa: F401
 from urllib.parse import urlparse, urlencode
 from urllib.request import Request, urlopen
 
@@ -87,6 +88,13 @@ ACCOUNT_RECORDS_SNAPSHOT_PATH = os.path.join(
 ACCOUNT_RECORDS_LOCK = threading.Lock()
 DEFAULT_CODEX_AGENT_SCRIPT_PATH = r"D:\Tencent\QQNT\QQdownloads\codex_agent.py"
 CODEX_AGENT_CONVERSION_TIMEOUT_SECONDS = 180
+ACCESS_TOKEN_CACHE_TTL_SECONDS = 300.0
+MESSAGE_CACHE_TTL_SECONDS = 1.5
+
+_mailbox_cache_guard = threading.Lock()
+_access_token_cache = {}
+_message_cache = {}
+_mailbox_key_locks = {}
 
 
 _sub2api_context = _sub2api.Sub2APIContext(globals())
@@ -157,7 +165,7 @@ def json_response(handler, status, payload):
     try:
         handler.end_headers()
         handler.wfile.write(body)
-    except (BrokenPipeError, ConnectionResetError) as exc:
+    except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError) as exc:
         log_info(
             f"response aborted by client status={status} detail={compact_text(exc)}"
         )
@@ -500,7 +508,63 @@ _mailbox_context = _mailbox.MailboxContext(globals())
 try_refresh_access_token = partial(
     _mailbox.try_refresh_access_token, _mailbox_context
 )
-refresh_access_token = partial(_mailbox.refresh_access_token, _mailbox_context)
+_refresh_access_token_uncached = partial(
+    _mailbox.refresh_access_token, _mailbox_context
+)
+
+
+def _mailbox_key_lock(key):
+    with _mailbox_cache_guard:
+        lock = _mailbox_key_locks.get(key)
+        if lock is None:
+            lock = threading.Lock()
+            _mailbox_key_locks[key] = lock
+        return lock
+
+
+def _cached_value(cache, key):
+    now = time.monotonic()
+    with _mailbox_cache_guard:
+        item = cache.get(key)
+        if item and float(item[0]) > now:
+            return copy.deepcopy(item[1])
+        if item:
+            cache.pop(key, None)
+    return None
+
+
+def _store_cached_value(cache, key, value, ttl):
+    with _mailbox_cache_guard:
+        cache[key] = (time.monotonic() + max(0.1, float(ttl)), copy.deepcopy(value))
+
+
+def refresh_access_token(client_id, refresh_token, strategy_names=None):
+    strategies = tuple(
+        strategy_names
+        or ("live", "entra-consumers-delegated", "entra-common-delegated")
+    )
+    key = (str(client_id or ""), str(refresh_token or ""), strategies)
+    cached = _cached_value(_access_token_cache, key)
+    if cached is not None:
+        return cached
+    with _mailbox_key_lock(("token",) + key):
+        cached = _cached_value(_access_token_cache, key)
+        if cached is not None:
+            return cached
+        result = _refresh_access_token_uncached(client_id, refresh_token, strategies)
+        ttl = ACCESS_TOKEN_CACHE_TTL_SECONDS
+        try:
+            expires_in = float(result.get("expires_in") or 0)
+            if expires_in > 0:
+                ttl = max(30.0, min(ttl, expires_in - 60.0))
+        except (TypeError, ValueError):
+            pass
+        _store_cached_value(_access_token_cache, key, result, ttl)
+        next_token = str(result.get("next_refresh_token") or "").strip()
+        if next_token and next_token != key[1]:
+            next_key = (key[0], next_token, strategies)
+            _store_cached_value(_access_token_cache, next_key, result, ttl)
+        return result
 build_xoauth2 = partial(_mailbox.build_xoauth2, _mailbox_context)
 open_mailbox = partial(_mailbox.open_mailbox, _mailbox_context)
 decode_mime_header = partial(_mailbox.decode_mime_header, _mailbox_context)
@@ -527,7 +591,38 @@ fetch_outlook_api_messages = partial(
 collect_imap_messages = partial(_mailbox.collect_imap_messages, _mailbox_context)
 collect_graph_messages = partial(_mailbox.collect_graph_messages, _mailbox_context)
 collect_outlook_messages = partial(_mailbox.collect_outlook_messages, _mailbox_context)
-collect_messages = partial(_mailbox.collect_messages, _mailbox_context)
+_collect_messages_uncached = partial(_mailbox.collect_messages, _mailbox_context)
+
+
+def collect_messages(email_addr, client_id, refresh_token, mailboxes, top):
+    normalized_mailboxes = tuple(str(item or "INBOX") for item in (mailboxes or []))
+    key = (
+        str(email_addr or "").strip().lower(),
+        str(client_id or ""),
+        str(refresh_token or ""),
+        normalized_mailboxes,
+        int(top or FETCH_LIMIT_DEFAULT),
+    )
+    cached = _cached_value(_message_cache, key)
+    if cached is not None:
+        return cached
+    with _mailbox_key_lock(("messages",) + key):
+        cached = _cached_value(_message_cache, key)
+        if cached is not None:
+            return cached
+        result = _collect_messages_uncached(
+            email_addr, client_id, refresh_token, normalized_mailboxes, top
+        )
+        _store_cached_value(_message_cache, key, result, MESSAGE_CACHE_TTL_SECONDS)
+        next_token = str(
+            (result.get("token_payload") or {}).get("next_refresh_token") or ""
+        ).strip()
+        if next_token and next_token != key[2]:
+            next_key = (key[0], key[1], next_token, key[3], key[4])
+            _store_cached_value(
+                _message_cache, next_key, result, MESSAGE_CACHE_TTL_SECONDS
+            )
+        return result
 extract_code = partial(_mailbox.extract_code, _mailbox_context)
 select_latest_code = partial(_mailbox.select_latest_code, _mailbox_context)
 

@@ -16,6 +16,13 @@ from .common import cpa_api_base_url as _cpa_api_base_url, error_text as _error_
 from .sub2api import _chatgpt_agent_identity
 
 
+def _cpa_management_headers(api_key: str) -> dict[str, str]:
+    return {
+        "Authorization": f"Bearer {str(api_key or '').strip()}",
+        "Accept": "application/json",
+    }
+
+
 def import_to_cpa(
     record: dict[str, Any],
     *,

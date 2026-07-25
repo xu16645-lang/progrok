@@ -1,19 +1,19 @@
 from __future__ import annotations
 
-import json
-import os
-import socket
+import json  # noqa: F401 - exposed through AppContext(globals())
+import os  # noqa: F401 - exposed through AppContext(globals())
+import socket  # noqa: F401 - exposed through AppContext(globals())
 import sys
-from io import BytesIO
-from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor, as_completed  # noqa: F401
+from datetime import datetime  # noqa: F401 - exposed through AppContext(globals())
+from io import BytesIO  # noqa: F401 - exposed through AppContext(globals())
 from pathlib import Path
 from threading import RLock
 from typing import Any, Literal
-from urllib.parse import unquote, urlparse
-from zipfile import ZIP_DEFLATED, ZipFile
+from urllib.parse import unquote, urlparse  # noqa: F401
+from zipfile import ZIP_DEFLATED, ZipFile  # noqa: F401
 
-from fastapi import FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query  # noqa: F401
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -35,19 +35,20 @@ def _configure_console_encoding() -> None:
 _configure_console_encoding()
 
 from app_context import AppContext
-from export_formats import (
+from export_formats import (  # noqa: F401
     build_chatgpt_auth_payload,
     build_cpa_record,
     build_sub2api_payload,
     cpa_filename,
 )
 from account_rotation import (
-    delete_records as delete_rotation_records,
-    list_records as list_rotation_records,
-    schedule_probe as schedule_rotation_probe,
-    start_scheduler as start_rotation_scheduler,
-    stop_scheduler as stop_rotation_scheduler,
-    sync_imported_sessions,
+    delete_records as delete_rotation_records,  # noqa: F401
+    list_registration_history,
+    list_records as list_rotation_records,  # noqa: F401
+    schedule_probe as schedule_rotation_probe,  # noqa: F401
+    start_scheduler as start_rotation_scheduler,  # noqa: F401
+    stop_scheduler as stop_rotation_scheduler,  # noqa: F401
+    sync_imported_sessions,  # noqa: F401
 )
 import app_core as _app_core
 import app_exports as _app_exports
@@ -187,7 +188,7 @@ registration = _get_registration_adapter()
 
 class Settings(BaseModel):
     registration_target: Literal["grok", "chatgpt"] = "grok"
-    registration_mode: Literal["protocol", "browser"] = "browser"
+    registration_mode: Literal["browser", "protocol"] = "browser"
     mail_provider: Literal[
         "yyds",
         "custom",
@@ -267,7 +268,8 @@ class HotmailProbeRequest(BaseModel):
 
 
 class HotmailStatusRequest(BaseModel):
-    used: bool
+    used: bool | None = None
+    preferred_for_next_use: bool | None = None
 
 
 class AccountRotationProbeRequest(BaseModel):
@@ -295,7 +297,7 @@ def _normalize_import_record_for_registration_target(
     )
 
 
-app = FastAPI(title="ProGrok 浏览器注册", version="1.0.0")
+app = FastAPI(title="ProGrok 浏览器注册", version="1.1.2")
 app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 
 
@@ -357,8 +359,8 @@ def output_paths() -> dict[str, Any]:
     paths = [
         {"key": "accounts", "label": "账号文件目录", "path": DATA_DIR / "accounts"},
         {"key": "auth", "label": "合并 auth.json", "path": DATA_DIR / "auth.json"},
-        {"key": "sso", "label": "SSO 输出目录", "path": DATA_DIR / "sso_output"},
-        {"key": "debug", "label": "注册诊断目录", "path": DATA_DIR / "register_sso"},
+        {"key": "sso", "label": "浏览器会话目录", "path": DATA_DIR / "register_sso"},
+        {"key": "legacy_sso", "label": "旧版 SSO 输出目录", "path": DATA_DIR / "sso_output"},
         {
             "key": "chatgpt_sessions",
             "label": "ChatGPT 原始 Session",
@@ -378,8 +380,10 @@ def _stored_auth_by_email() -> dict[str, dict[str, Any]]:
     return _app_exports._stored_auth_by_email(_app_context())
 
 
-def _download_records(batch_id: str | None = None) -> list[dict[str, Any]]:
-    return _app_exports._download_records(_app_context(), batch_id)
+def _download_records(
+    batch_id: str | None = None, history_date: str | None = None
+) -> list[dict[str, Any]]:
+    return _app_exports._download_records(_app_context(), batch_id, history_date)
 
 
 def _download_chatgpt_records(batch_id: str | None = None) -> list[dict[str, Any]]:
@@ -399,8 +403,16 @@ def download_accounts(
         "chatgpt_auth_json",
     ] = Query("pure_sso", alias="format"),
     batch_id: str | None = None,
+    history_date: str | None = None,
 ) -> Response:
-    return _app_exports.download_accounts(_app_context(), export_format, batch_id)
+    return _app_exports.download_accounts(
+        _app_context(), export_format, batch_id, history_date
+    )
+
+
+@app.get("/api/download/history")
+def download_history() -> dict[str, Any]:
+    return list_registration_history()
 
 
 @app.get("/api/solver/detect")
@@ -464,6 +476,11 @@ def hotmail_import(request: HotmailImportRequest) -> dict[str, Any]:
 @app.post("/api/mail/hotmail/accounts/probe")
 def hotmail_probe_all(request: HotmailProbeRequest) -> dict[str, Any]:
     return _app_routes.hotmail_probe_all(_app_context(), request)
+
+
+@app.post("/api/mail/hotmail/accounts/reset-health")
+def hotmail_reset_health() -> dict[str, Any]:
+    return _app_routes.hotmail_reset_health(_app_context())
 
 
 @app.post("/api/mail/hotmail/accounts/{account_id}/probe")

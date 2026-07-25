@@ -61,6 +61,7 @@ def _prepare_registration_session(
             expiry_ms=expiry_ms,
             mail_provider=mail_provider,
             hotmail_local_base_url=hotmail_local_base_url,
+            should_cancel=should_cancel,
         )
     except Exception as e:  # noqa: BLE001
         return {"ok": False, "error": str(e)}
@@ -262,16 +263,12 @@ def start_registration(
         key = ""
     else:
         provider = (
-            (
-                captcha_provider
-                or ctx.CAPTCHA_PROVIDER
-                or ctx.os.environ.get("GROK2API_CAPTCHA_PROVIDER")
-                or ctx.os.environ.get("CAPTCHA_PROVIDER")
-                or "local"
-            )
-            .strip()
-            .lower()
-        )
+            captcha_provider
+            or ctx.CAPTCHA_PROVIDER
+            or ctx.os.environ.get("GROK2API_CAPTCHA_PROVIDER")
+            or ctx.os.environ.get("CAPTCHA_PROVIDER")
+            or "local"
+        ).strip().lower()
         if provider not in {"local", "yescaptcha"}:
             provider = "local"
         try:
@@ -294,7 +291,8 @@ def start_registration(
             if not solver_wait.get("ready"):
                 return {
                     "ok": False,
-                    "error": solver_wait.get("error") or f"本地过盾未就绪: {solver_url}",
+                    "error": solver_wait.get("error")
+                    or f"本地过盾未就绪: {solver_url}",
                     "local_solver": solver_wait,
                 }
         else:
@@ -327,7 +325,6 @@ def start_registration(
                 ctx.values["YESCAPTCHA_KEY"] = key
             except Exception:
                 pass
-
     try:
         n = int(count if count is not None else 1)
     except (TypeError, ValueError):
@@ -384,22 +381,6 @@ def start_registration(
             mail_prov = _norm_mail(mail_provider, base_url=moemail_base_url)
         except Exception:
             mail_prov = requested_mail_provider
-
-            # Single job — keep original response shape for UI compatibility.
-    if n == 1:
-        return ctx._start_one_registration(
-            yescaptcha_key=key,
-            proxy=proxy_val,
-            moemail_api_key=moemail_api_key,
-            moemail_base_url=moemail_base_url,
-            prefix=prefix,
-            domain=domain,
-            expiry_ms=expiry_ms,
-            mail_provider=mail_prov,
-            hotmail_local_base_url=hotmail_local_base_url,
-            post_registration=post_registration,
-            headless=headless,
-        )
 
     batch_id = f"batch_{ctx.uuid.uuid4().hex[:12]}"
     # Snapshot keeps the full multi-line text so resume / UI can re-parse the pool.

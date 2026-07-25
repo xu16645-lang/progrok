@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import email
 import imaplib
+import random
 import re
 import ssl
 from email import policy
@@ -12,6 +13,28 @@ from typing import Any
 from urllib.parse import unquote, urlparse
 
 from .common import _extract_codes_and_links
+
+
+def _pick_domain(value: str | None) -> str:
+    domains = [
+        item.strip().lstrip("@").strip(".").lower()
+        for item in re.split(r"[,;\s]+", value or "")
+        if item.strip()
+    ]
+    domains = list(dict.fromkeys(domains))
+    if not domains:
+        raise ValueError("IMAP mailbox domain is required")
+    invalid = [
+        domain
+        for domain in domains
+        if not re.fullmatch(
+            r"(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?",
+            domain,
+        )
+    ]
+    if invalid:
+        raise ValueError(f"Invalid IMAP mailbox domain: {invalid[0]}")
+    return random.choice(domains)
 
 
 def _imap_config(base_url: str | None, api_key: str | None) -> dict[str, Any]:
@@ -71,10 +94,10 @@ def imap_create_mailbox(
 ) -> dict[str, Any]:
     """Create a virtual address that is received by an IMAP catch-all inbox."""
     del expiry_ms, proxy, proxy_username, proxy_password
-    dom = (domain or "").strip().lstrip("@").strip(".").lower()
+    dom = _pick_domain(domain)
     local = re.sub(r"[^a-z0-9._+-]", "", (name or "").strip().lower())
-    if not local or not dom:
-        raise ValueError("IMAP mailbox name and domain are required")
+    if not local:
+        raise ValueError("IMAP mailbox name is required")
 
     config = _imap_config(base_url, api_key)
     client = _imap_connect(config)

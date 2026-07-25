@@ -73,6 +73,7 @@ def try_refresh_access_token(ctx: MailboxContext, endpoint, client_id, refresh_t
         "payload": {
             "access_token": access_token,
             "next_refresh_token": str(payload.get("refresh_token") or "").strip(),
+            "expires_in": payload.get("expires_in"),
         },
     }
 
@@ -99,6 +100,7 @@ def refresh_access_token(
             return {
                 "access_token": result["payload"]["access_token"],
                 "next_refresh_token": result["payload"]["next_refresh_token"],
+                "expires_in": result["payload"].get("expires_in"),
                 "token_endpoint": result["endpoint"],
                 "token_url": result["url"],
             }
@@ -296,24 +298,30 @@ def fetch_messages(
             )
         )
         messages = []
-        for message_id in selected_ids:
-            fetch_status, fetch_data = client.fetch(message_id, "(RFC822)")
-            if fetch_status != "OK" or not fetch_data:
-                continue
-            raw_bytes = b""
+        # Fetch the selected messages in one IMAP round trip. Downloading each
+        # RFC822 body separately makes every verification poll scale with `top`.
+        fetch_status, fetch_data = client.fetch(b",".join(selected_ids), "(RFC822)")
+        if fetch_status == "OK" and fetch_data:
+            fallback_index = 0
             for item in fetch_data:
-                if isinstance(item, tuple) and len(item) >= 2:
-                    raw_bytes = item[1]
-                    break
-            if not raw_bytes:
-                continue
-            messages.append(
-                ctx.normalize_message(
-                    message_id.decode("utf-8", errors="ignore"),
-                    raw_bytes,
-                    logical_mailbox,
+                if not isinstance(item, tuple) or len(item) < 2 or not item[1]:
+                    continue
+                metadata = item[0] if isinstance(item[0], bytes) else b""
+                match = ctx.re.match(rb"\s*(\d+)", metadata)
+                if match:
+                    message_id = match.group(1)
+                elif fallback_index < len(selected_ids):
+                    message_id = selected_ids[fallback_index]
+                else:
+                    continue
+                fallback_index += 1
+                messages.append(
+                    ctx.normalize_message(
+                        message_id.decode("utf-8", errors="ignore"),
+                        item[1],
+                        logical_mailbox,
+                    )
                 )
-            )
         return {
             "mailbox": logical_mailbox,
             "messages": messages,

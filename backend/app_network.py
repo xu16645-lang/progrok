@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from app_context import AppContext
 
 
 def detect_solver(ctx):

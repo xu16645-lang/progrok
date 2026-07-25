@@ -1,4 +1,5 @@
 """Browser-only xAI account registration and OAuth consent flow."""
+
 from __future__ import annotations
 
 import re
@@ -10,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 
 XAI_SIGNUP_URL = "https://accounts.x.ai/sign-up?redirect=grok-com"
 XAI_GROK_URL = "https://grok.com/"
+XAI_ACCOUNT_URL = "https://accounts.x.ai/account"
 TURNSTILE_WAIT_SEC = 90.0
 TURNSTILE_CLICK_COOLDOWN_SEC = 2.0
 TURNSTILE_MAX_CLICK_ATTEMPTS = 3
@@ -23,6 +25,8 @@ SIGNUP_SUBMIT_TIMEOUT_SEC = 35.0
 SIGNUP_SUBMIT_RETRY_SEC = 4.0
 SIGNUP_SUBMIT_MAX_ATTEMPTS = 3
 SIGNUP_TRANSITION_STABLE_POLLS = 3
+ACTION_TRANSITION_RETRY_SEC = 4.0
+ACTION_TRANSITION_MAX_ATTEMPTS = 3
 
 # Firefox otherwise deprioritizes fully covered windows on Windows. During a
 # visible concurrent batch that can delay React/Turnstile timers until the user
@@ -83,6 +87,10 @@ def _ensure_camoufox() -> None:
 
 class XaiBrowserError(RuntimeError):
     """Raised when xAI browser registration or consent cannot continue."""
+
+
+class XaiOAuthAccessDenied(XaiBrowserError):
+    """Raised when xAI rejects consent for an authenticated account."""
 
 
 class XaiBrowserCancelled(XaiBrowserError):
@@ -304,7 +312,9 @@ class XaiVisibleRegistration:
             assert self.page is not None
             self._progress("navigate", "loading")
             self._action_delay()
-            self.page.goto(XAI_SIGNUP_URL, wait_until="domcontentloaded", timeout=45_000)
+            self.page.goto(
+                XAI_SIGNUP_URL, wait_until="domcontentloaded", timeout=45_000
+            )
             self._settle_page()
             self._enforce_visible_window()
             self._progress("navigate", "ready")
@@ -314,160 +324,6 @@ class XaiVisibleRegistration:
         except Exception as exc:
             self.close()
             raise XaiBrowserError(f"xAI 浏览器启动失败：{exc}") from exc
-
-    def _login_for_authorization(self, email: str, password: str) -> None:
-        """Create a real browser login session before starting Device Flow."""
-        if self.page is None:
-            raise XaiBrowserError("xAI 授权浏览器未启动")
-        self._progress("session", "full_login_starting")
-        self.page.goto(
-            "https://accounts.x.ai/sign-in?redirect=grok-com",
-            wait_until="domcontentloaded",
-            timeout=45_000,
-        )
-        submitted_forms: set[str] = set()
-        email_method_selected = False
-        deadline = min(self.deadline, time.time() + 120.0)
-        while time.time() < deadline:
-            self._check_cancel()
-            current_url = str(self.page.url or "")
-            sso, _cookies = self._extract_sso()
-            if sso and not re.search(r"/sign-in(?:[/?#]|$)", current_url, re.I):
-                self._progress("session", "full_login_complete")
-                return
-
-            text = self._page_text()
-            if re.search(
-                r"invalid credentials|incorrect (?:email|password)|email or password.*incorrect|"
-                r"邮箱或密码.*(?:错误|不正确)",
-                text,
-                re.I,
-            ):
-                raise XaiBrowserError("xAI 浏览器完整登录失败：邮箱或密码不正确")
-            self._raise_page_error(email)
-
-            email_input = self._first_visible(
-                [
-                    'input[type="email"]',
-                    'input[name="email"]',
-                    'input[autocomplete="email"]',
-                    'input[placeholder*="email" i]',
-                ]
-            )
-            password_input = self._first_visible(
-                [
-                    'input[type="password"]',
-                    'input[name*="password" i]',
-                    'input[autocomplete="current-password"]',
-                ]
-            )
-            if email_input is None and password_input is None:
-                if not email_method_selected and re.search(
-                    r"sign in with email|log\s*in with email|login with email|"
-                    r"使用邮箱.*登录|邮箱登录",
-                    text,
-                    re.I,
-                ):
-                    if self._click_action(
-                        r"^sign in with email$|^log\s*in with email$|^login with email$|"
-                        r"使用邮箱.*登录|邮箱登录"
-                    ):
-                        email_method_selected = True
-                        self._progress("session", "email_login_selected")
-                        self._settle_page()
-                        continue
-                self._wait(250)
-                continue
-
-            form_key = (
-                ("email" if email_input is not None else "")
-                + "+"
-                + ("password" if password_input is not None else "")
-            )
-            if form_key in submitted_forms:
-                self._wait(250)
-                continue
-
-            anchor = password_input or email_input
-            self._action_delay()
-            if self._input_is_editable(email_input):
-                email_input.fill(email)
-                self._progress("session", "login_email_filled")
-            elif email_input is not None:
-                self._progress("session", "login_email_confirmed_readonly")
-            if password_input is not None:
-                password_input.fill(password)
-                self._progress("session", "login_password_filled")
-                self._wait_for_turnstile()
-            self._submit(
-                anchor,
-                "sign in|log\\s*in|login|continue|next|submit|登录|继续|下一步",
-            )
-            submitted_forms.add(form_key)
-            self._progress("session", "login_form_submitted", form=form_key)
-            self._settle_page()
-        raise XaiBrowserError("xAI 浏览器完整登录超时，未进入 Grok 登录成功页")
-
-    def open_authorization(
-        self,
-        cookies: dict[str, str],
-        *,
-        email: str = "",
-        password: str = "",
-        force_full_login: bool = False,
-    ) -> None:
-        """Open a private context with protocol cookies ready for Device Allow."""
-        try:
-            self._open_private_context()
-            if force_full_login:
-                if not email or not password:
-                    raise XaiBrowserError("浏览器完整登录缺少邮箱或密码")
-                self._login_for_authorization(email, password)
-            else:
-                self.sync_cookies(cookies, authenticated=True)
-            assert self.page is not None
-            # Browser registration reaches an authenticated Grok landing page
-            # before Device Flow starts. Reproduce that browser state after
-            # restoring a protocol session instead of navigating straight from
-            # an empty context to the device form.
-            if not force_full_login:
-                self.page.goto(
-                    XAI_GROK_URL, wait_until="domcontentloaded", timeout=45_000
-                )
-                self._wait(1_000)
-            landing_url = str(self.page.url or "")
-            if re.search(r"/(?:sign-in|sign-up)(?:[/?#]|$)", landing_url, re.I):
-                raise XaiBrowserError("协议登录会话未被授权浏览器接受，无法进入 Grok 登录页")
-            self._raise_page_error("")
-            self._progress("session", "authenticated_landing_ready")
-            self._progress("session", "authorization_ready")
-        except (XaiBrowserCancelled, XaiBrowserError):
-            self.close()
-            raise
-        except Exception as exc:
-            self.close()
-            raise XaiBrowserError(f"xAI 授权浏览器启动失败：{exc}") from exc
-
-    def sync_cookies(
-        self, cookies: dict[str, str] | None, *, authenticated: bool = False
-    ) -> None:
-        """Compatibility helper for restoring a previously saved browser session."""
-        if not self.context or not isinstance(cookies, dict):
-            return
-        clean = {
-            str(name): str(value)
-            for name, value in cookies.items()
-            if str(name).strip() and value is not None and str(value)
-        }
-        payloads: list[dict[str, str]] = []
-        for url in ("https://accounts.x.ai", "https://grok.com"):
-            payloads.extend(
-                {"name": name, "value": value, "url": url}
-                for name, value in clean.items()
-            )
-        if payloads:
-            self.context.add_cookies(payloads)
-            self._progress("session" if authenticated else "init", "cookies_synced")
 
     def _first_visible(self, selectors: list[str]) -> Any | None:
         if self.page is None:
@@ -507,7 +363,9 @@ class XaiVisibleRegistration:
         except Exception:
             return ""
 
-    def _find_action(self, pattern: str) -> Any | None:
+    def _find_action(
+        self, pattern: str, *, allow_submit_fallback: bool = True
+    ) -> Any | None:
         if self.page is None:
             return None
         regex = re.compile(pattern, re.I)
@@ -520,6 +378,8 @@ class XaiVisibleRegistration:
                         return candidate
             except Exception:
                 continue
+        if not allow_submit_fallback:
+            return None
         try:
             submit = self.page.locator('button[type="submit"], input[type="submit"]')
             for index in range(min(10, int(submit.count()))):
@@ -530,27 +390,12 @@ class XaiVisibleRegistration:
             pass
         return None
 
-    def _device_action_busy(self) -> bool:
-        """Return True while the Device Flow page is processing a submitted action."""
-        if self.page is None:
-            return False
-        for selector in (
-            '[aria-busy="true"]',
-            '[role="progressbar"]',
-            'button:disabled',
-            'button[aria-disabled="true"]',
-        ):
-            try:
-                locator = self.page.locator(selector)
-                for index in range(min(10, int(locator.count()))):
-                    if locator.nth(index).is_visible():
-                        return True
-            except Exception:
-                continue
-        return False
-
-    def _click_action(self, pattern: str) -> bool:
-        candidate = self._find_action(pattern)
+    def _click_action(
+        self, pattern: str, *, allow_submit_fallback: bool = True
+    ) -> bool:
+        candidate = self._find_action(
+            pattern, allow_submit_fallback=allow_submit_fallback
+        )
         if candidate is None:
             return False
         # xAI re-renders buttons while Locator.click performs its stability and
@@ -558,9 +403,11 @@ class XaiVisibleRegistration:
         # treating that successful transition as a Playwright timeout.
         return self._click_locator_center(candidate, timeout=3_000)
 
-    def _wait_for_email_signup_form(self) -> bool:
+    def _wait_for_email_signup_form(
+        self, *, timeout_sec: float = SIGNUP_FORM_TIMEOUT_SEC
+    ) -> bool:
         """Confirm the email form rendered after choosing email signup."""
-        deadline = min(self.deadline, time.time() + SIGNUP_FORM_TIMEOUT_SEC)
+        deadline = min(self.deadline, time.time() + max(0.1, timeout_sec))
         selectors = [
             'input[type="email"]',
             'input[name="email"]',
@@ -573,6 +420,69 @@ class XaiVisibleRegistration:
                 return True
             self._wait(200)
         return False
+
+    def _select_email_signup(self) -> None:
+        """Choose email signup and require the email form to actually appear."""
+        pattern = r"^sign up with email$|使用邮箱.*注册|邮箱注册"
+        per_attempt_timeout = max(
+            1.0, SIGNUP_FORM_TIMEOUT_SEC / ACTION_TRANSITION_MAX_ATTEMPTS
+        )
+        for attempt in range(1, ACTION_TRANSITION_MAX_ATTEMPTS + 1):
+            self._check_cancel()
+            self._progress("signup_method", "clicking", attempt=attempt)
+            self._action_delay()
+            if self._click_action(pattern, allow_submit_fallback=False):
+                if self._wait_for_email_signup_form(
+                    timeout_sec=per_attempt_timeout
+                ):
+                    return
+            if attempt < ACTION_TRANSITION_MAX_ATTEMPTS:
+                self._progress("signup_method", "retrying", attempt=attempt + 1)
+        raise XaiBrowserError(
+            "xAI 邮箱注册入口点击后页面未切换，已动态重试 3 次"
+        )
+
+    def _wait_for_verification_transition(
+        self, anchor: Any, pattern: str
+    ) -> None:
+        """Retry code submission only while the same verification form remains."""
+        attempts = 1
+        initial_url = str(self.page.url or "") if self.page is not None else ""
+        next_retry_at = time.time() + ACTION_TRANSITION_RETRY_SEC
+        deadline = min(
+            self.deadline,
+            time.time()
+            + ACTION_TRANSITION_RETRY_SEC * ACTION_TRANSITION_MAX_ATTEMPTS
+            + 3.0,
+        )
+        while time.time() < deadline:
+            self._check_cancel()
+            text = self._page_text()
+            if re.search(
+                r"invalid|incorrect|expired|验证码.*(?:错误|过期)", text, re.I
+            ):
+                return
+            verification = self._verification_target()
+            if verification is None:
+                sso, _cookies = self._extract_sso()
+                current_url = str(self.page.url or "") if self.page is not None else ""
+                if sso or self._signup_form_present() or current_url != initial_url:
+                    return
+            now = time.time()
+            if (
+                verification is not None
+                and now >= next_retry_at
+                and attempts < ACTION_TRANSITION_MAX_ATTEMPTS
+            ):
+                attempts += 1
+                self._progress("verification", "retrying_submit", attempt=attempts)
+                self._submit(anchor, pattern)
+                self._progress("verification", "submitted", attempt=attempts)
+                next_retry_at = time.time() + ACTION_TRANSITION_RETRY_SEC
+            self._wait(250)
+        raise XaiBrowserError(
+            f"xAI 验证码提交后页面未变化，已尝试点击 {attempts} 次"
+        )
 
     def _submit(self, anchor: Any | None, pattern: str) -> None:
         self._action_delay()
@@ -588,13 +498,16 @@ class XaiVisibleRegistration:
         # The profile page contains password-related inputs whose generated
         # names can include "code". It is not the email-code page until the
         # visible password field has disappeared.
-        if self._first_visible(
-            [
-                'input[type="password"]',
-                'input[name*="password" i]',
-                'input[autocomplete="new-password"]',
-            ]
-        ) is not None:
+        if (
+            self._first_visible(
+                [
+                    'input[type="password"]',
+                    'input[name*="password" i]',
+                    'input[autocomplete="new-password"]',
+                ]
+            )
+            is not None
+        ):
             return None
         try:
             split = self.page.locator('input[maxlength="1"]')
@@ -629,16 +542,14 @@ class XaiVisibleRegistration:
             )
             seen = int(responses.count()) > 0
             for index in range(min(5, int(responses.count()))):
-                value = str(
-                    responses.nth(index).input_value(timeout=500) or ""
-                ).strip()
+                value = str(responses.nth(index).input_value(timeout=500) or "").strip()
                 if len(value) >= 20:
                     return "passed"
         except Exception:
             pass
         try:
             containers = self.page.locator(
-                '.cf-turnstile, [data-sitekey], [data-turnstile-widget]'
+                ".cf-turnstile, [data-sitekey], [data-turnstile-widget]"
             )
             for index in range(min(5, int(containers.count()))):
                 if containers.nth(index).is_visible(timeout=300):
@@ -892,7 +803,9 @@ class XaiVisibleRegistration:
         except Exception:
             return False
 
-    def _click_iframe_checkbox_region(self, iframe: Any, *, timeout: int = 1_500) -> bool:
+    def _click_iframe_checkbox_region(
+        self, iframe: Any, *, timeout: int = 1_500
+    ) -> bool:
         """Click the left checkbox zone of a Turnstile iframe widget."""
         try:
             if not iframe.is_visible(timeout=timeout):
@@ -924,19 +837,22 @@ class XaiVisibleRegistration:
         return current in {"passed", "finishing"}
 
     def _signup_form_present(self) -> bool:
-        return self._first_visible(
-            [
-                'input[type="password"]',
-                'input[name*="password" i]',
-                'input[autocomplete="new-password"]',
-                'input[name*="first" i]',
-                'input[name*="given" i]',
-                'input[name*="last" i]',
-                'input[name*="family" i]',
-                'input[name="name"]',
-                'input[name*="fullName" i]',
-            ]
-        ) is not None
+        return (
+            self._first_visible(
+                [
+                    'input[type="password"]',
+                    'input[name*="password" i]',
+                    'input[autocomplete="new-password"]',
+                    'input[name*="first" i]',
+                    'input[name*="given" i]',
+                    'input[name*="last" i]',
+                    'input[name*="family" i]',
+                    'input[name="name"]',
+                    'input[name*="fullName" i]',
+                ]
+            )
+            is not None
+        )
 
     def _wait_for_signup_transition(self, pattern: str) -> None:
         """Confirm the profile submit changed state, retrying only if still actionable."""
@@ -981,12 +897,12 @@ class XaiVisibleRegistration:
                     attempts += 1
                     self._progress("completion", "retrying_submit", attempt=attempts)
                     if not self._click_locator_center(action, timeout=3_000):
-                        self._progress("completion", "retry_click_failed", attempt=attempts)
+                        self._progress(
+                            "completion", "retry_click_failed", attempt=attempts
+                        )
                     next_retry_at = now + SIGNUP_SUBMIT_RETRY_SEC
             self._wait(250)
-        raise XaiBrowserError(
-            f"xAI 资料提交后页面未变化，已尝试点击 {attempts} 次"
-        )
+        raise XaiBrowserError(f"xAI 资料提交后页面未变化，已尝试点击 {attempts} 次")
 
     def _dispatch_turnstile_target_click(self, kind: str, target: Any) -> bool:
         """Fire one click strategy. True only means the event was dispatched."""
@@ -1124,19 +1040,43 @@ class XaiVisibleRegistration:
         except Exception:
             return False
 
-    def _extract_sso(self) -> tuple[str | None, dict[str, str]]:
+    def _browser_cookie_rows(self) -> list[dict[str, Any]]:
         if self.context is None:
-            return None, {}
+            return []
         try:
             rows = self.context.cookies()
         except TypeError:
             rows = self.context.cookies(["https://accounts.x.ai", "https://grok.com"])
+        return [dict(row) for row in (rows or []) if isinstance(row, dict)]
+
+    def _extract_sso(self) -> tuple[str | None, dict[str, str]]:
+        rows = self._browser_cookie_rows()
         cookies = {
             str(row.get("name") or ""): str(row.get("value") or "")
             for row in (rows or [])
-            if isinstance(row, dict) and row.get("name") and row.get("value")
+            if row.get("name") and row.get("value")
         }
         return cookies.get("sso") or cookies.get("sso-rw"), cookies
+
+    def _oauth_cookie_metadata(self) -> str:
+        """Return a compact, non-secret summary for xAI OAuth cookies."""
+        rows: set[tuple[str, str]] = set()
+        for cookie in self._browser_cookie_rows():
+            name = str(cookie.get("name") or "").strip()
+            domain = str(cookie.get("domain") or "").strip().lower()
+            normalized = domain.lstrip(".")
+            if not name or not (
+                normalized == "x.ai"
+                or normalized.endswith(".x.ai")
+                or normalized == "grok.com"
+                or normalized.endswith(".grok.com")
+            ):
+                continue
+            rows.add((name, normalized or "unknown"))
+        if not rows:
+            return "none"
+        domains = ",".join(sorted({domain for _name, domain in rows}))
+        return f"count:{len(rows)} domains:{domains}"
 
     def _raise_page_error(self, email: str) -> None:
         text = self._page_text()
@@ -1150,7 +1090,9 @@ class XaiVisibleRegistration:
             )
         ):
             raise XaiBrowserError("xAI/Cloudflare 拒绝了当前浏览器或代理")
-        if re.search(r"email.*already|account.*already|already.*registered", text, re.I):
+        if re.search(
+            r"email.*already|account.*already|already.*registered", text, re.I
+        ):
             raise XaiBrowserError(f"邮箱 {email} 已存在 xAI 账号")
         if re.search(r"unsupported.*email|email.*not supported", text, re.I):
             raise XaiBrowserError(f"xAI 不支持当前邮箱地址：{email}")
@@ -1205,13 +1147,7 @@ class XaiVisibleRegistration:
                 re.I,
             ):
                 self._progress("signup_method", "selecting_email")
-                self._action_delay()
-                if not self._click_action(
-                    r"^sign up with email$|使用邮箱.*注册|邮箱注册"
-                ):
-                    raise XaiBrowserError("未找到 xAI 邮箱注册入口")
-                if not self._wait_for_email_signup_form():
-                    raise XaiBrowserError("已点击 xAI 邮箱注册入口，但邮箱表单未加载")
+                self._select_email_signup()
                 acted.add("signup_method")
                 self._progress("signup_method", "selected")
                 self._settle_page()
@@ -1242,14 +1178,22 @@ class XaiVisibleRegistration:
                         target.fill(value)
                         anchor = target
                     self._progress(stage, "code_filled")
-                    self._submit(anchor, "verify|confirm|continue|submit|验证|确认|继续")
-                    self._progress(stage, "submitted")
+                    submit_pattern = (
+                        "verify|confirm|continue|submit|验证|确认|继续"
+                    )
+                    self._submit(anchor, submit_pattern)
+                    self._progress(stage, "submitted", attempt=1)
+                    self._wait_for_verification_transition(
+                        anchor, submit_pattern
+                    )
                     acted.add(stage)
                     self._settle_page()
                     continue
 
                 text = self._page_text()
-                if re.search(r"invalid|incorrect|expired|验证码.*(?:错误|过期)", text, re.I):
+                if re.search(
+                    r"invalid|incorrect|expired|验证码.*(?:错误|过期)", text, re.I
+                ):
                     self._progress(stage, "retrying")
                     resend = self._click_action(
                         "resend|send.*again|new code|try again|重新发送|重发"
@@ -1368,6 +1312,192 @@ class XaiVisibleRegistration:
                 continue
             self._wait(250)
 
+    def login_for_pkce(self, email: str, password: str) -> None:
+        """Establish a natural browser login before local PKCE authorization."""
+        self.open()
+        assert self.page is not None
+        self._progress("local_oauth", "login_starting")
+        self.page.goto(
+            "https://accounts.x.ai/sign-in?redirect=grok-com",
+            wait_until="domcontentloaded",
+            timeout=45_000,
+        )
+        self._settle_page()
+        deadline = min(self.deadline, time.time() + 150.0)
+        attempts = 0
+        last_submit_at = 0.0
+        email_method_selected = False
+        while time.time() < deadline:
+            self._check_cancel()
+            if last_submit_at and self._is_grok_landing_url(self.page.url):
+                self._stabilize_pkce_account_session()
+                return
+            if last_submit_at and self._is_xai_account_url(self.page.url):
+                self._stabilize_pkce_account_session()
+                return
+
+            text = self._page_text()
+            self._raise_page_error(email)
+            invalid_credentials = bool(
+                re.search(
+                    r"invalid credentials|incorrect (?:email|password)|"
+                    r"email or password.*incorrect|邮箱或密码.*(?:错误|不正确)",
+                    text,
+                    re.I,
+                )
+            )
+            if invalid_credentials and time.time() - last_submit_at >= 3.0:
+                if attempts >= ACTION_TRANSITION_MAX_ATTEMPTS:
+                    raise XaiBrowserError("xAI 浏览器登录失败：邮箱或密码未被上游接受")
+                self._progress("local_oauth", "login_retrying", attempt=attempts + 1)
+                self._wait(min(10_000, attempts * 3_000))
+                self.page.goto(
+                    "https://accounts.x.ai/sign-in?redirect=grok-com",
+                    wait_until="domcontentloaded",
+                    timeout=45_000,
+                )
+                self._settle_page()
+                email_method_selected = False
+                continue
+
+            email_input = self._first_visible(
+                [
+                    'input[type="email"]',
+                    'input[name="email"]',
+                    'input[autocomplete="email"]',
+                    'input[placeholder*="email" i]',
+                ]
+            )
+            password_input = self._first_visible(
+                [
+                    'input[type="password"]',
+                    'input[name*="password" i]',
+                    'input[autocomplete="current-password"]',
+                ]
+            )
+            if email_input is None and password_input is None:
+                if not email_method_selected and re.search(
+                    r"sign in with email|log\s*in with email|login with email|"
+                    r"使用邮箱.*登录|邮箱登录",
+                    text,
+                    re.I,
+                ):
+                    if self._click_action(
+                        r"^sign in with email$|^log\s*in with email$|"
+                        r"^login with email$|使用邮箱.*登录|邮箱登录",
+                        allow_submit_fallback=False,
+                    ):
+                        email_method_selected = True
+                        self._progress("local_oauth", "email_login_selected")
+                        self._settle_page()
+                        continue
+                self._wait(250)
+                continue
+
+            anchor = password_input or email_input
+            if self._input_is_editable(email_input):
+                try:
+                    email_input.fill(email)
+                except Exception:
+                    if last_submit_at and self._is_grok_landing_url(self.page.url):
+                        self._stabilize_pkce_account_session()
+                        return
+                    raise
+                self._progress("local_oauth", "login_email_filled")
+            if password_input is not None:
+                try:
+                    password_input.fill(password)
+                except Exception:
+                    if last_submit_at and self._is_grok_landing_url(self.page.url):
+                        self._stabilize_pkce_account_session()
+                        return
+                    raise
+                self._progress("local_oauth", "login_password_filled")
+                self._wait_for_turnstile()
+            if attempts >= ACTION_TRANSITION_MAX_ATTEMPTS:
+                raise XaiBrowserError("xAI 浏览器登录提交后页面未变化，已重试 3 次")
+            if last_submit_at and time.time() - last_submit_at < ACTION_TRANSITION_RETRY_SEC:
+                self._wait(250)
+                continue
+            attempts += 1
+            self._submit(
+                anchor,
+                r"sign in|log\s*in|login|continue|next|submit|登录|继续|下一步",
+            )
+            last_submit_at = time.time()
+            self._progress("local_oauth", "login_submitted", attempt=attempts)
+            self._settle_page()
+        raise XaiBrowserError("等待 xAI 浏览器登录完成超时")
+
+    @staticmethod
+    def _is_grok_landing_url(url: str) -> bool:
+        try:
+            parsed = urlparse(str(url or ""))
+        except Exception:
+            return False
+        return parsed.scheme in {"http", "https"} and parsed.hostname in {
+            "grok.com",
+            "www.grok.com",
+        }
+
+    @staticmethod
+    def _is_xai_account_url(url: str) -> bool:
+        try:
+            parsed = urlparse(str(url or ""))
+        except Exception:
+            return False
+        return (
+            parsed.scheme in {"http", "https"}
+            and parsed.hostname == "accounts.x.ai"
+            and parsed.path.rstrip("/") == "/account"
+        )
+
+    def _stabilize_pkce_account_session(self, *, retry: bool = False) -> None:
+        """Verify the accounts.x.ai session before opening OAuth consent."""
+        if self.page is None:
+            raise XaiBrowserError("xAI 授权浏览器未启动")
+        self._progress(
+            "local_oauth",
+            "account_session_resyncing" if retry else "account_session_syncing",
+        )
+        # Successful browser signups authorize from accounts.x.ai/account.
+        # Wait for the set-cookie redirect chain, then reproduce that state.
+        self._wait(3_000 if retry else 1_500)
+        try:
+            self.page.goto(
+                XAI_ACCOUNT_URL,
+                wait_until="domcontentloaded",
+                timeout=45_000,
+            )
+        except Exception:
+            if not self._is_xai_account_url(self.page.url):
+                raise
+        self._settle_page()
+
+        stable_observations = 0
+        for _attempt in range(20):
+            self._check_cancel()
+            if self._is_xai_account_url(self.page.url):
+                stable_observations += 1
+                if stable_observations >= 2:
+                    self._progress(
+                        "local_oauth",
+                        "login_complete",
+                        origin="accounts.x.ai/account",
+                        cookies=self._oauth_cookie_metadata(),
+                    )
+                    return
+            else:
+                stable_observations = 0
+            self._wait(500)
+        raise XaiBrowserError(
+            "xAI 自然登录后未能建立稳定的 accounts.x.ai 账户会话，未发起 OAuth 授权"
+        )
+
+    def prepare_pkce_retry(self) -> None:
+        """Return a rejected consent page to a verified account session."""
+        self._stabilize_pkce_account_session(retry=True)
+
     @staticmethod
     def _callback_from_url(url: str, expected_state: str) -> str | None:
         try:
@@ -1380,19 +1510,32 @@ class XaiVisibleRegistration:
         if not code:
             return None
         if expected_state and state and state != expected_state:
-            raise XaiBrowserError("Sub2API Grok OAuth 回调 state 不匹配")
+            raise XaiBrowserError("xAI OAuth 回调 state 不匹配")
         return str(url)
 
-    def _authorization_code_from_page(self) -> str | None:
+    def _pkce_oob_code_from_page(
+        self, current_url: str, page_text: str, expected_state: str
+    ) -> str | None:
+        """Read xAI's PKCE completion code when it renders instead of redirecting."""
         if self.page is None:
             return None
-        text = self._page_text()
+        try:
+            parsed = urlparse(str(current_url or ""))
+            values = parse_qs(parsed.query)
+        except Exception:
+            return None
+        if parsed.hostname != "accounts.x.ai" or parsed.path != "/oauth2/consent":
+            return None
         if not re.search(
-            r"copy.*code|input.*code|code.*complete.*login|复制.*代码|输入.*代码|完成登录",
-            text,
+            r"enter this code to finish signing in|copy the code below|"
+            r"automatically detect a successful completion",
+            str(page_text or ""),
             re.I,
         ):
             return None
+        state = str((values.get("state") or [""])[0]).strip()
+        if expected_state and state and state != expected_state:
+            raise XaiBrowserError("xAI OAuth 授权码页面 state 不匹配")
         try:
             candidates = self.page.locator("input, textarea, code")
             for index in range(min(20, int(candidates.count()))):
@@ -1400,23 +1543,29 @@ class XaiVisibleRegistration:
                 if not candidate.is_visible():
                     continue
                 try:
-                    value = str(candidate.input_value(timeout=1_000) or "").strip()
+                    value = str(candidate.input_value(timeout=500) or "").strip()
                 except Exception:
                     try:
-                        value = str(candidate.inner_text(timeout=1_000) or "").strip()
+                        value = str(candidate.inner_text(timeout=500) or "").strip()
                     except Exception:
                         continue
-                if re.fullmatch(r"[A-Za-z0-9_-]{20,}", value):
+                if re.fullmatch(r"[A-Za-z0-9._~-]{32,512}", value):
                     return value
         except Exception:
-            pass
+            return None
         return None
 
-    def authorize_sub2_oauth(self, auth_url: str, expected_state: str) -> str:
-        """Authorize Sub2API's PKCE request and return its callback URL or code."""
+    def authorize_pkce(self, auth_url: str, expected_state: str) -> str:
+        """Authorize a PKCE request and return its callback URL or code."""
         if self.page is None:
             raise XaiBrowserError("xAI 授权浏览器未启动")
-        self._progress("sub2_oauth", "opening_authorization")
+        self._progress("local_oauth", "opening_authorization")
+        self._progress(
+            "local_oauth",
+            "authorization_context",
+            origin=str(self.page.url or "")[:120],
+            cookies=self._oauth_cookie_metadata(),
+        )
         self._action_delay()
         try:
             self.page.goto(auth_url, wait_until="domcontentloaded", timeout=45_000)
@@ -1424,157 +1573,71 @@ class XaiVisibleRegistration:
             # A localhost callback can fail to connect after the URL already contains code.
             callback = self._callback_from_url(str(self.page.url or ""), expected_state)
             if callback:
-                self._progress("sub2_oauth", "code_captured")
+                self._progress("local_oauth", "code_captured")
                 return callback
         self._settle_page()
-        clicked_signatures: set[str] = set()
+        clicked_signatures: dict[str, tuple[int, float]] = {}
         deadline = min(self.deadline, time.time() + 120.0)
         while time.time() < deadline:
             self._check_cancel()
             current_url = str(self.page.url or "")
             callback = self._callback_from_url(current_url, expected_state)
             if callback:
-                self._progress("sub2_oauth", "code_captured")
+                self._progress("local_oauth", "code_captured")
                 return callback
-            page_code = self._authorization_code_from_page()
-            if page_code:
-                self._progress("sub2_oauth", "code_captured")
-                return page_code
             text = self._page_text()
+            page_code = self._pkce_oob_code_from_page(
+                current_url, text, expected_state
+            )
+            if page_code:
+                self._progress("local_oauth", "oob_code_captured")
+                return page_code
             if re.search(
                 r"access denied|authorization.*failed|request.*denied|授权.*失败|拒绝授权",
                 text,
                 re.I,
             ):
-                raise XaiBrowserError(f"Sub2API Grok OAuth 授权失败：{text[:240]}")
+                raise XaiOAuthAccessDenied(f"xAI OAuth 授权失败：{text[:240]}")
             action = self._find_action(
                 r"allow|authorize|approve|accept|confirm|continue|grant|允许|授权|同意|确认|继续"
             )
             if action is not None:
                 signature = f"{current_url}|{text[:160]}"
-                if signature not in clicked_signatures:
-                    clicked_signatures.add(signature)
-                    self._action_delay()
-                    action.click(timeout=3_000)
-                    self._progress("sub2_oauth", "approval_submitted")
-                    self._settle_page()
-                    continue
-            self._wait(500)
-        raise XaiBrowserError("等待 Sub2API Grok OAuth 回调或授权码超时")
-
-    def authorize_device(self, verify_url: str, user_code: str) -> None:
-        """Approve an OAuth device request through the authenticated browser page."""
-        if self.page is None:
-            raise XaiBrowserError("xAI 授权浏览器未启动")
-        self._progress("oauth", "opening_device_authorization")
-        self._action_delay()
-        self.page.goto(verify_url, wait_until="domcontentloaded", timeout=45_000)
-        self._wait(600)
-        code_filled = False
-        code_attempts = 0
-        approval_attempts = 0
-        last_code_submit_at = 0.0
-        last_approval_at = 0.0
-        busy_state = ""
-        waiting_approval_logged = False
-        approval_processing_seen = False
-        action_settle_sec = 5.0
-        deadline = min(self.deadline, time.time() + 90.0)
-        while time.time() < deadline:
-            self._check_cancel()
-            text = self._page_text()
-            url = str(self.page.url or "")
-            if re.search(r"/(?:sign-in|sign-up)(?:[/?#]|$)", url, re.I):
-                raise XaiBrowserError("协议登录会话未被授权浏览器接受，页面跳转到登录入口")
-            if "done" in url or re.search(
-                r"device.*(?:authorized|approved)|authorization complete|you may close",
-                text,
-                re.I,
-            ):
-                self._progress("oauth", "approved")
-                return
-            if re.search(r"expired|invalid.*code|request.*denied", text, re.I):
-                raise XaiBrowserError(f"xAI 设备授权失败：{text[:240]}")
-            action_busy = self._device_action_busy()
-            if action_busy and code_attempts > 0 and approval_attempts == 0:
-                if busy_state != "code":
-                    busy_state = "code"
-                    self._progress("oauth", "device_code_processing")
-            elif action_busy and approval_attempts > 0:
-                approval_processing_seen = True
-                if busy_state != "approval":
-                    busy_state = "approval"
-                    self._progress("oauth", "approval_processing")
-            target = self._first_visible(
-                [
-                    'input[name="user_code"]',
-                    'input[name*="code" i]',
-                    'input[autocomplete="one-time-code"]',
-                ]
-            )
-            if target is not None:
-                if not code_filled:
-                    self._action_delay()
-                    target.fill(user_code)
-                    code_filled = True
-                    self._progress("oauth", "device_code_filled")
-                    self._wait(250)
-                if action_busy:
-                    self._wait(500)
-                    continue
-                busy_state = ""
-                if code_attempts == 0:
-                    self._action_delay()
-                    self._submit(target, "continue|verify|submit|继续|验证")
-                    code_attempts += 1
-                    last_code_submit_at = time.time()
-                    self._progress(
-                        "oauth", "device_code_submitted", attempt=code_attempts
+                attempts, last_clicked_at = clicked_signatures.get(
+                    signature, (0, 0.0)
+                )
+                if (
+                    attempts < ACTION_TRANSITION_MAX_ATTEMPTS
+                    and (
+                        attempts == 0
+                        or time.time() - last_clicked_at
+                        >= ACTION_TRANSITION_RETRY_SEC
                     )
-                    self._wait(800)
-                else:
-                    if not waiting_approval_logged:
-                        waiting_approval_logged = True
-                        self._progress("oauth", "waiting_for_approval_page")
-                    self._wait(200)
-                continue
-            action = self._find_action(
-                "allow|authorize|approve|accept|confirm|允许|授权|同意|确认"
-            )
-            if action is not None:
-                if action_busy:
-                    self._wait(500)
-                    continue
-                if approval_attempts > 0 and (
-                    approval_processing_seen
-                    or time.time() - last_approval_at >= action_settle_sec
                 ):
-                    self._progress("oauth", "approval_roundtrip_complete")
-                    return
-                busy_state = ""
-                if approval_attempts == 0:
                     self._action_delay()
-                    if not self._click_locator_center(action, timeout=3_000):
-                        action.click(timeout=3_000)
-                    approval_attempts += 1
-                    last_approval_at = time.time()
+                    attempts += 1
+                    clicked = self._click_locator_center(action, timeout=3_000)
+                    clicked_signatures[signature] = (attempts, time.time())
                     self._progress(
-                        "oauth", "approval_submitted", attempt=approval_attempts
+                        "local_oauth",
+                        "approval_submitted" if clicked else "approval_click_failed",
+                        attempt=attempts,
                     )
-                    self._wait(800)
-                else:
-                    self._wait(200)
-                continue
-            if not action_busy and approval_attempts > 0 and (
-                approval_processing_seen
-                or time.time() - last_approval_at >= action_settle_sec
-            ):
-                self._progress("oauth", "approval_roundtrip_complete")
-                return
-            self._wait(250)
-        if code_attempts > 0 and approval_attempts == 0:
-            raise XaiBrowserError("Device Code 已提交，但页面始终未进入 Allow 授权确认页")
-        raise XaiBrowserError("xAI 设备授权页面等待超时")
+                    if clicked:
+                        self._settle_page()
+                    else:
+                        self._wait(250)
+                    continue
+                if (
+                    attempts >= ACTION_TRANSITION_MAX_ATTEMPTS
+                    and time.time() - last_clicked_at
+                    >= ACTION_TRANSITION_RETRY_SEC
+                ):
+                    raise XaiBrowserError(
+                        "xAI OAuth 授权点击后页面未变化，已动态重试 3 次"
+                    )
+            self._wait(500)
+        raise XaiBrowserError("等待 xAI OAuth 回调或授权码超时")
 
     def hold_failure(self, *, seconds: float = 20.0) -> None:
         if self.headless or self.page is None:

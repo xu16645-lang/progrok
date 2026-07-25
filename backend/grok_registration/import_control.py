@@ -108,10 +108,13 @@ def _retry_import_now(
         current = ctx._sessions.get(sid) or dict(sess)
         current["auto_import"] = auto_import
         current["status"] = "imported"
-        current["message"] = (
+        summary = (
             f"手动导入完成：成功 {ok_count}，失败 {fail_count}"
             if manual_retry
             else f"队列导入完成：成功 {ok_count}，失败 {fail_count}"
+        )
+        current["message"] = (
+            f"{summary}；原因：{first_error}" if first_error else summary
         )
         current["pipeline_queue"] = {
             "phase": "done",

@@ -14,12 +14,13 @@ if str(BACKEND_DIR) not in sys.path:
 
 import app
 import grok_build_adapter as grok_adapter
-import sso_to_auth_json
 from grok_build_adapter import _make_email_receiver, _snapshot_reg_config
 from xai_browser import (
+    XAI_ACCOUNT_URL,
     XAI_GROK_URL,
     XAI_SIGNUP_URL,
     XaiBrowserRuntime,
+    XaiOAuthAccessDenied,
     XaiVisibleRegistration,
 )
 
@@ -110,6 +111,95 @@ class _Runtime:
 
 
 class XaiBrowserTests(unittest.TestCase):
+    def test_login_for_pkce_accepts_grok_landing_during_stale_password_fill(self):
+        visual = XaiVisibleRegistration(on_progress=lambda message: events.append(message))
+        visual.page = _Page()
+        events = []
+        field_round = {"value": 0}
+
+        class _EmailField:
+            def fill(self, _value):
+                return None
+
+        class _PasswordField:
+            def fill(self, _value):
+                visual.page.url = XAI_GROK_URL
+                raise RuntimeError("locator became stale during navigation")
+
+        email_field = _EmailField()
+        password_field = _PasswordField()
+
+        def first_visible(selectors):
+            is_password = any("password" in selector for selector in selectors)
+            if is_password:
+                field_round["value"] += 1
+                return password_field if field_round["value"] >= 2 else None
+            return email_field if field_round["value"] == 0 else None
+
+        with (
+            patch.object(visual, "open"),
+            patch.object(visual, "_extract_sso", return_value=(None, {})),
+            patch.object(visual, "_page_text", return_value=""),
+            patch.object(visual, "_raise_page_error"),
+            patch.object(visual, "_first_visible", side_effect=first_visible),
+            patch.object(
+                visual,
+                "_input_is_editable",
+                side_effect=lambda field: field is email_field,
+            ),
+            patch.object(visual, "_submit"),
+            patch.object(visual, "_settle_page"),
+            patch.object(visual, "_wait"),
+        ):
+            visual.login_for_pkce("user@example.test", "secret")
+
+        self.assertEqual(visual.page.url, XAI_ACCOUNT_URL)
+        self.assertTrue(any("login_complete" in event for event in events))
+
+    def test_pkce_account_session_rejects_a_redirect_back_to_sign_in(self):
+        visual = XaiVisibleRegistration()
+        visual.page = _Page()
+
+        def redirect_to_sign_in(_url, **_kwargs):
+            visual.page.url = "https://accounts.x.ai/sign-in?redirect=grok-com"
+
+        visual.page.goto = redirect_to_sign_in
+        with (
+            patch.object(visual, "_settle_page"),
+            patch.object(visual, "_wait"),
+            self.assertRaisesRegex(Exception, "账户会话"),
+        ):
+            visual._stabilize_pkce_account_session()
+
+    def test_pkce_access_denied_uses_distinct_error_for_fresh_retry(self):
+        visual = XaiVisibleRegistration()
+        visual.page = _Page()
+        visual.page.url = XAI_ACCOUNT_URL
+        with (
+            patch.object(visual, "_action_delay"),
+            patch.object(visual, "_settle_page"),
+            patch.object(visual, "_page_text", return_value="Access denied"),
+            patch.object(visual, "_oauth_cookie_metadata", return_value="sso@.x.ai"),
+            self.assertRaises(XaiOAuthAccessDenied),
+        ):
+            visual.authorize_pkce("https://auth.x.ai/oauth2/authorize", "state-1")
+
+    def test_oauth_cookie_diagnostics_do_not_list_cookie_names(self):
+        visual = XaiVisibleRegistration()
+        with patch.object(
+            visual,
+            "_browser_cookie_rows",
+            return_value=[
+                {"name": "sso", "domain": ".x.ai", "value": "secret"},
+                {"name": "cf_clearance", "domain": ".grok.com", "value": "secret"},
+            ],
+        ):
+            summary = visual._oauth_cookie_metadata()
+
+        self.assertEqual(summary, "count:2 domains:grok.com,x.ai")
+        self.assertNotIn("sso", summary)
+        self.assertNotIn("cf_clearance", summary)
+
     def test_click_action_uses_resolved_element_center(self):
         visual = XaiVisibleRegistration()
         action = _Action()
@@ -158,6 +248,68 @@ class XaiBrowserTests(unittest.TestCase):
 
         self.assertEqual(wait.call_count, 2)
         wait.assert_called_with(200)
+
+    def test_email_signup_re_resolves_and_retries_when_first_click_has_no_effect(self):
+        events = []
+        visual = XaiVisibleRegistration(on_progress=events.append)
+        visual.page = _Page()
+        with (
+            patch.object(visual, "_action_delay"),
+            patch.object(visual, "_click_action", return_value=True) as click,
+            patch.object(
+                visual,
+                "_wait_for_email_signup_form",
+                side_effect=[False, True],
+            ),
+        ):
+            visual._select_email_signup()
+
+        self.assertEqual(click.call_count, 2)
+        self.assertTrue(any("signup_method: retrying" in event for event in events))
+
+    def test_verification_submit_retries_until_next_form_is_detected(self):
+        events = []
+        visual = XaiVisibleRegistration(on_progress=events.append)
+        visual.page = _Page()
+        visual.deadline = 1000.0
+        clock = {"value": 100.0}
+        retries = {"count": 0, "polls": 0}
+
+        def wait(milliseconds):
+            clock["value"] += max(0.25, milliseconds / 1000.0)
+
+        def verification_target():
+            retries["polls"] += 1
+            if retries["polls"] == 1:
+                return None
+            return None if retries["count"] else ("single", object())
+
+        def submit(_anchor, _pattern):
+            retries["count"] += 1
+
+        with (
+            patch("xai_browser.time.time", side_effect=lambda: clock["value"]),
+            patch.object(visual, "_wait", side_effect=wait),
+            patch.object(visual, "_page_text", return_value=""),
+            patch.object(
+                visual, "_verification_target", side_effect=verification_target
+            ),
+            patch.object(visual, "_extract_sso", return_value=(None, {})),
+            patch.object(
+                visual,
+                "_signup_form_present",
+                side_effect=lambda: retries["count"] > 0,
+            ),
+            patch.object(visual, "_submit", side_effect=submit),
+        ):
+            visual._wait_for_verification_transition(
+                object(), "verify|continue"
+            )
+
+        self.assertEqual(retries["count"], 1)
+        self.assertTrue(
+            any("verification: retrying_submit" in event for event in events)
+        )
 
     def test_signup_transition_ignores_transient_form_disappearance(self):
         events = []
@@ -289,9 +441,15 @@ class XaiBrowserTests(unittest.TestCase):
                 "_wait_for_turnstile",
                 side_effect=lambda: events.append(("turnstile",)),
             ),
-            patch.object(visual, "_wait", side_effect=lambda ms: events.append(("wait", ms))),
-            patch.object(visual, "_settle_page", side_effect=lambda: events.append(("settle",))),
-            patch.object(visual, "_submit", side_effect=lambda *_args: events.append(("submit",))),
+            patch.object(
+                visual, "_wait", side_effect=lambda ms: events.append(("wait", ms))
+            ),
+            patch.object(
+                visual, "_settle_page", side_effect=lambda: events.append(("settle",))
+            ),
+            patch.object(
+                visual, "_submit", side_effect=lambda *_args: events.append(("submit",))
+            ),
             patch.object(visual, "_wait_for_signup_transition"),
         ):
             result = visual.register_account(
@@ -361,7 +519,9 @@ class XaiBrowserTests(unittest.TestCase):
                 "_turnstile_status",
                 side_effect=["pending", "pending", "passed"],
             ),
-            patch.object(visual, "_turnstile_needs_click", return_value=False) as needs_click,
+            patch.object(
+                visual, "_turnstile_needs_click", return_value=False
+            ) as needs_click,
             patch.object(visual, "_click_turnstile_challenge") as click,
             patch.object(visual, "_wait") as wait,
         ):
@@ -390,7 +550,9 @@ class XaiBrowserTests(unittest.TestCase):
                 "_turnstile_needs_click",
                 side_effect=[False, True],
             ),
-            patch.object(visual, "_click_turnstile_challenge", return_value=True) as click,
+            patch.object(
+                visual, "_click_turnstile_challenge", return_value=True
+            ) as click,
             patch.object(visual, "_wait") as wait,
         ):
             visual._wait_for_turnstile()
@@ -505,7 +667,9 @@ class XaiBrowserTests(unittest.TestCase):
         statuses = iter(["pending", "pending", "pending", "pending", "pending"])
 
         with (
-            patch.object(visual, "_turnstile_status", side_effect=lambda: next(statuses)),
+            patch.object(
+                visual, "_turnstile_status", side_effect=lambda: next(statuses)
+            ),
             patch.object(visual, "_wait"),
         ):
             # Every strategy dispatches, but status never advances -> not success.
@@ -532,9 +696,13 @@ class XaiBrowserTests(unittest.TestCase):
             return True
 
         with (
-            patch.object(visual, "_turnstile_status", side_effect=lambda: next(statuses)),
+            patch.object(
+                visual, "_turnstile_status", side_effect=lambda: next(statuses)
+            ),
             patch.object(visual, "_turnstile_click_targets", return_value=targets),
-            patch.object(visual, "_dispatch_turnstile_target_click", side_effect=dispatch),
+            patch.object(
+                visual, "_dispatch_turnstile_target_click", side_effect=dispatch
+            ),
             patch.object(visual, "_wait") as wait,
         ):
             self.assertTrue(visual._click_turnstile_challenge())
@@ -544,8 +712,12 @@ class XaiBrowserTests(unittest.TestCase):
             [item for item in events if item[0] == "dispatch"],
             [("dispatch", "checkbox"), ("dispatch", "surface")],
         )
-        self.assertTrue(any("click_no_effect_checkbox" in x for x in events if isinstance(x, str)))
-        self.assertTrue(any("click_effect_surface" in x for x in events if isinstance(x, str)))
+        self.assertTrue(
+            any("click_no_effect_checkbox" in x for x in events if isinstance(x, str))
+        )
+        self.assertTrue(
+            any("click_effect_surface" in x for x in events if isinstance(x, str))
+        )
         self.assertEqual(wait.call_count, 2)
 
     def test_pending_to_absent_is_not_click_success(self):
@@ -564,16 +736,24 @@ class XaiBrowserTests(unittest.TestCase):
             return True
 
         with (
-            patch.object(visual, "_turnstile_status", side_effect=lambda: next(statuses)),
+            patch.object(
+                visual, "_turnstile_status", side_effect=lambda: next(statuses)
+            ),
             patch.object(visual, "_turnstile_click_targets", return_value=targets),
-            patch.object(visual, "_dispatch_turnstile_target_click", side_effect=dispatch),
+            patch.object(
+                visual, "_dispatch_turnstile_target_click", side_effect=dispatch
+            ),
             patch.object(visual, "_wait"),
         ):
             self.assertFalse(visual._click_turnstile_challenge())
 
         self.assertEqual(len([item for item in events if item[0] == "dispatch"]), 3)
-        self.assertTrue(any("click_widget_missing_" in x for x in events if isinstance(x, str)))
-        self.assertFalse(any("click_effect_" in x for x in events if isinstance(x, str)))
+        self.assertTrue(
+            any("click_widget_missing_" in x for x in events if isinstance(x, str))
+        )
+        self.assertFalse(
+            any("click_effect_" in x for x in events if isinstance(x, str))
+        )
 
     def test_turnstile_iframe_locators_dedupe_by_dom_identity(self):
         class _Handle:
@@ -730,7 +910,9 @@ class XaiBrowserTests(unittest.TestCase):
                 ],
             ),
             patch.object(visual, "_turnstile_needs_click", return_value=True),
-            patch.object(visual, "_click_turnstile_challenge", return_value=True) as click,
+            patch.object(
+                visual, "_click_turnstile_challenge", return_value=True
+            ) as click,
             patch.object(visual, "_wait"),
             patch("xai_browser.TURNSTILE_CLICK_COOLDOWN_SEC", 0.0),
         ):
@@ -738,7 +920,7 @@ class XaiBrowserTests(unittest.TestCase):
 
         self.assertEqual(click.call_count, 3)
 
-    def test_sub2_oauth_callback_requires_matching_state(self):
+    def test_local_oauth_callback_requires_matching_state(self):
         callback = "http://127.0.0.1:56121/callback?code=code-1&state=state-1"
 
         self.assertEqual(
@@ -747,6 +929,52 @@ class XaiBrowserTests(unittest.TestCase):
         )
         with self.assertRaisesRegex(Exception, "state"):
             XaiVisibleRegistration._callback_from_url(callback, "other-state")
+
+    def test_local_pkce_reads_xai_oob_completion_code(self):
+        authorization_code = "aq0yycZ-4bfTVZfm7IGdsfsHGw2AWk3Bbpp2surbNRHO-s"
+
+        class Candidate:
+            def is_visible(self):
+                return True
+
+            def input_value(self, timeout=0):
+                self.timeout = timeout
+                return authorization_code
+
+        class Locator:
+            def count(self):
+                return 1
+
+            def nth(self, index):
+                self.index = index
+                return Candidate()
+
+        class Page:
+            def locator(self, selector):
+                self.selector = selector
+                return Locator()
+
+        browser = object.__new__(XaiVisibleRegistration)
+        browser.page = Page()
+        result = browser._pkce_oob_code_from_page(
+            "https://accounts.x.ai/oauth2/consent?response_type=code&state=state-1",
+            "Enter this code to finish signing in. Copy the code below.",
+            "state-1",
+        )
+
+        self.assertEqual(result, authorization_code)
+
+    def test_local_pkce_rejects_oob_code_outside_xai_completion_page(self):
+        browser = object.__new__(XaiVisibleRegistration)
+        browser.page = object()
+
+        self.assertIsNone(
+            browser._pkce_oob_code_from_page(
+                "https://example.com/oauth2/consent?state=state-1",
+                "Enter this code to finish signing in.",
+                "state-1",
+            )
+        )
 
     def test_grok_monitor_projection_redacts_runtime_fields(self):
         session = {
@@ -824,297 +1052,17 @@ class XaiBrowserTests(unittest.TestCase):
         )
 
         visual.open()
-        visual.sync_cookies({"sso": "token"})
 
         self.assertEqual(runtime.browser.context.page.gotos[0][0], XAI_SIGNUP_URL)
-        self.assertEqual(runtime.browser.kwargs["viewport"], {"width": 760, "height": 480})
-        self.assertEqual(len(runtime.browser.context.cookies), 2)
+        self.assertEqual(
+            runtime.browser.kwargs["viewport"], {"width": 760, "height": 480}
+        )
         self.assertTrue(any("private_context_created" in event for event in events))
-        self.assertTrue(any("init: cookies_synced" in event for event in events))
 
         visual.close()
 
         self.assertTrue(runtime.browser.context.cleared)
         self.assertTrue(runtime.browser.context.closed)
-
-    def test_protocol_authorization_injects_cookies_before_first_navigation(self):
-        events = []
-        runtime = _Runtime()
-        visual = XaiVisibleRegistration(
-            runtime=runtime,
-            headless=True,
-            on_progress=events.append,
-        )
-
-        visual.open_authorization({"sso": "session-token", "sso-rw": "session-token"})
-
-        self.assertEqual(runtime.browser.context.page.gotos[0][0], XAI_GROK_URL)
-        self.assertEqual(len(runtime.browser.context.cookies), 4)
-        self.assertTrue(any("session: cookies_synced" in event for event in events))
-        self.assertTrue(
-            any("session: authenticated_landing_ready" in event for event in events)
-        )
-        self.assertTrue(any("session: authorization_ready" in event for event in events))
-        visual.close()
-
-    def test_protocol_authorization_can_require_full_browser_login(self):
-        events = []
-        runtime = _Runtime()
-        visual = XaiVisibleRegistration(
-            runtime=runtime,
-            headless=True,
-            on_progress=events.append,
-        )
-
-        def complete_login(_email, _password):
-            runtime.browser.context.page.url = XAI_GROK_URL
-
-        with patch.object(
-            visual, "_login_for_authorization", side_effect=complete_login
-        ) as login:
-            visual.open_authorization(
-                {"sso": "session-token"},
-                email="account@example.test",
-                password="secret-password",
-                force_full_login=True,
-            )
-
-        login.assert_called_once_with("account@example.test", "secret-password")
-        self.assertEqual(runtime.browser.context.cookies, [])
-        self.assertTrue(any("session: authorization_ready" in event for event in events))
-        visual.close()
-
-    def test_full_login_recognizes_login_with_email_entry(self):
-        visual = XaiVisibleRegistration()
-        visual.page = _Page()
-        clock = {"value": 100.0}
-        clicked = []
-
-        def wait(milliseconds):
-            clock["value"] += max(0.2, milliseconds / 1000.0)
-            if clicked:
-                visual.page.url = XAI_GROK_URL
-
-        def click_action(pattern):
-            clicked.append(pattern)
-            return True
-
-        with (
-            patch("xai_browser.time.time", side_effect=lambda: clock["value"]),
-            patch.object(visual, "_wait", side_effect=wait),
-            patch.object(visual, "_page_text", return_value="Login with email"),
-            patch.object(visual, "_first_visible", return_value=None),
-            patch.object(visual, "_click_action", side_effect=click_action),
-            patch.object(
-                visual,
-                "_extract_sso",
-                side_effect=[(None, {}), ("browser-sso", {})],
-            ),
-            patch.object(visual, "_raise_page_error"),
-            patch.object(visual, "_settle_page", side_effect=lambda: wait(600)),
-        ):
-            visual._login_for_authorization(
-                "account@example.test", "secret-password"
-            )
-
-        self.assertEqual(len(clicked), 1)
-        self.assertIn("login with email", clicked[0])
-
-    def test_full_login_skips_readonly_email_and_fills_password(self):
-        visual = XaiVisibleRegistration()
-        visual.page = _Page()
-        clock = {"value": 100.0}
-
-        class _Field:
-            def __init__(self, editable):
-                self.editable = editable
-                self.values = []
-
-            def is_editable(self, **_kwargs):
-                return self.editable
-
-            def fill(self, value):
-                self.values.append(value)
-
-        email_field = _Field(False)
-        password_field = _Field(True)
-
-        def first_visible(selectors):
-            joined = " ".join(selectors)
-            return password_field if "password" in joined else email_field
-
-        def submit(_anchor, _pattern):
-            visual.page.url = XAI_GROK_URL
-
-        def wait(milliseconds):
-            clock["value"] += max(0.2, milliseconds / 1000.0)
-
-        with (
-            patch("xai_browser.time.time", side_effect=lambda: clock["value"]),
-            patch.object(visual, "_wait", side_effect=wait),
-            patch.object(visual, "_page_text", return_value=""),
-            patch.object(visual, "_first_visible", side_effect=first_visible),
-            patch.object(visual, "_submit", side_effect=submit),
-            patch.object(visual, "_wait_for_turnstile"),
-            patch.object(visual, "_settle_page", side_effect=lambda: wait(600)),
-            patch.object(
-                visual,
-                "_extract_sso",
-                side_effect=[(None, {}), ("browser-sso", {})],
-            ),
-            patch.object(visual, "_raise_page_error"),
-        ):
-            visual._login_for_authorization(
-                "account@example.test", "secret-password"
-            )
-
-        self.assertEqual(email_field.values, [])
-        self.assertEqual(password_field.values, ["secret-password"])
-
-    def test_device_authorization_submits_each_page_once_until_state_changes(self):
-        events = []
-        visual = XaiVisibleRegistration(on_progress=events.append)
-        page = _Page()
-        state = {"value": "code", "code_clicks": 0, "allow_clicks": 0}
-        clock = {"value": 100.0}
-
-        def goto(url, **kwargs):
-            page.gotos.append((url, kwargs))
-            page.url = url
-
-        def wait(milliseconds):
-            clock["value"] += max(0.2, milliseconds / 1000.0)
-
-        class _CodeInput:
-            def fill(self, _value):
-                return None
-
-        def submit(_target, _pattern):
-            state["code_clicks"] += 1
-            state["value"] = "consent"
-
-        def click_allow(_action, **_kwargs):
-            state["allow_clicks"] += 1
-            state["value"] = "done"
-            return True
-
-        page.goto = goto
-        visual.page = page
-        visual.deadline = 1000.0
-        with (
-            patch("xai_browser.time.time", side_effect=lambda: clock["value"]),
-            patch.object(visual, "_wait", side_effect=wait),
-            patch.object(
-                visual,
-                "_page_text",
-                side_effect=lambda: (
-                    "authorization complete" if state["value"] == "done" else ""
-                ),
-            ),
-            patch.object(
-                visual,
-                "_first_visible",
-                side_effect=lambda _selectors: (
-                    _CodeInput() if state["value"] == "code" else None
-                ),
-            ),
-            patch.object(visual, "_submit", side_effect=submit),
-            patch.object(
-                visual,
-                "_find_action",
-                side_effect=lambda _pattern: (
-                    _Action() if state["value"] == "consent" else None
-                ),
-            ),
-            patch.object(visual, "_click_locator_center", side_effect=click_allow),
-        ):
-            visual.authorize_device(
-                "https://accounts.x.ai/oauth2/device?user_code=ABCD-1234",
-                "ABCD-1234",
-            )
-
-        self.assertEqual(state["code_clicks"], 1)
-        self.assertEqual(state["allow_clicks"], 1)
-        self.assertTrue(any("oauth: approved" in event for event in events))
-
-    def test_device_authorization_waits_for_allow_without_resubmitting_code(self):
-        events = []
-        visual = XaiVisibleRegistration(on_progress=events.append)
-        page = _Page()
-        clock = {"value": 100.0}
-        state = {
-            "value": "code",
-            "code_clicks": 0,
-            "allow_clicks": 0,
-            "busy_polls": 0,
-        }
-
-        class _CodeInput:
-            def fill(self, _value):
-                return None
-
-        def goto(url, **kwargs):
-            page.gotos.append((url, kwargs))
-            page.url = url
-
-        def wait(milliseconds):
-            clock["value"] += max(0.2, milliseconds / 1000.0)
-            if state["busy_polls"] >= 1 and clock["value"] >= 102.0:
-                state["value"] = "consent"
-
-        def submit(_target, _pattern):
-            state["code_clicks"] += 1
-
-        def click_allow(_action, **_kwargs):
-            state["allow_clicks"] += 1
-            state["value"] = "done"
-            return True
-
-        def busy():
-            if state["code_clicks"] == 0:
-                return False
-            state["busy_polls"] += 1
-            return state["busy_polls"] == 1
-
-        page.goto = goto
-        visual.page = page
-        visual.deadline = 1000.0
-        with (
-            patch("xai_browser.time.time", side_effect=lambda: clock["value"]),
-            patch.object(visual, "_wait", side_effect=wait),
-            patch.object(
-                visual,
-                "_page_text",
-                side_effect=lambda: (
-                    "authorization complete" if state["value"] == "done" else ""
-                ),
-            ),
-            patch.object(
-                visual,
-                "_first_visible",
-                side_effect=lambda _selectors: (
-                    _CodeInput() if state["value"] == "code" else None
-                ),
-            ),
-            patch.object(visual, "_submit", side_effect=submit),
-            patch.object(visual, "_device_action_busy", side_effect=busy),
-            patch.object(
-                visual,
-                "_find_action",
-                side_effect=lambda _pattern: (
-                    _Action() if state["value"] == "consent" else None
-                ),
-            ),
-            patch.object(visual, "_click_locator_center", side_effect=click_allow),
-        ):
-            visual.authorize_device(
-                "https://accounts.x.ai/oauth2/device?user_code=ABCD-1234",
-                "ABCD-1234",
-            )
-
-        self.assertEqual(state["code_clicks"], 1)
-        self.assertEqual(state["allow_clicks"], 1)
-        self.assertTrue(any("oauth: approval_submitted" in event for event in events))
 
     def test_grok_batch_snapshot_keeps_browser_mode(self):
         snapshot = _snapshot_reg_config(
@@ -1149,6 +1097,7 @@ class XaiBrowserTests(unittest.TestCase):
         create_receiver.assert_called_once_with(
             "http://127.0.0.1:17373",
             verification_target="xai",
+            should_cancel=None,
         )
 
 
@@ -1170,22 +1119,9 @@ class XaiRegistrationConfigTests(unittest.TestCase):
             app.start_register(settings)
         self.assertIn("ChatGPT 注册暂时停用", str(caught.exception.detail))
 
-    def test_start_registration_rejects_hybrid_protocol_request(self):
-        settings = app.Settings(
-            registration_target="grok",
-            registration_mode="protocol",
-            mail_provider="yyds",
-            count=1,
-            concurrency=1,
-        )
-        with self.assertRaises(app.HTTPException) as caught:
-            app.start_register(settings)
-
-        self.assertIn("半协议注册暂时停用", str(caught.exception.detail))
-
     def test_post_registration_mode_is_normalized_and_chatgpt_stays_browser(self):
         grok = app._post_registration_config(
-            {"registration_target": "grok", "registration_mode": "invalid"}
+            {"registration_target": "grok", "registration_mode": "protocol"}
         )
         chatgpt = app._post_registration_config(
             {"registration_target": "chatgpt", "registration_mode": "protocol"}
@@ -1200,11 +1136,11 @@ class XaiRegistrationConfigTests(unittest.TestCase):
                 config = app._post_registration_config(
                     {
                         "registration_target": "grok",
-                        "registration_mode": "protocol",
+                        "registration_mode": "browser",
                         "registration_json_format": output_format,
                     }
                 )
-                self.assertEqual(config["registration_mode"], "protocol")
+                self.assertEqual(config["registration_mode"], "browser")
                 self.assertEqual(config["output_format"], output_format)
 
     def test_registration_mode_persists_through_config_save_and_load(self):
@@ -1218,68 +1154,81 @@ class XaiRegistrationConfigTests(unittest.TestCase):
                 saved = app.save_config({"registration_mode": "protocol"})
                 loaded = app.load_config()
 
-        self.assertEqual(saved["registration_mode"], "protocol")
-        self.assertEqual(loaded["registration_mode"], "protocol")
+        self.assertEqual(saved["registration_mode"], "browser")
+        self.assertEqual(loaded["registration_mode"], "browser")
 
-    def test_xai_worker_routes_protocol_and_browser_modes_separately(self):
-        sid = f"unit-mode-{time.monotonic_ns()}"
-        receiver = object()
-        try:
-            with (
-                patch.object(grok_adapter._protocol_worker, "_run_registration") as protocol,
-                patch.object(grok_adapter._worker, "_run_registration") as browser,
-            ):
-                grok_adapter._sessions[sid] = {
-                    "_post_registration": {"registration_mode": "protocol"}
-                }
-                grok_adapter._run_registration(sid, "key", "proxy", receiver)
-                protocol.assert_called_once()
-                browser.assert_not_called()
-
-                browser.reset_mock()
-                protocol.reset_mock()
-                grok_adapter._sessions[sid] = {
-                    "_post_registration": {"registration_mode": "browser"}
-                }
-                grok_adapter._run_registration(sid, "key", "proxy", receiver)
-                browser.assert_called_once()
-                protocol.assert_not_called()
-        finally:
-            grok_adapter._sessions.pop(sid, None)
-
-    def test_xai_legacy_session_without_mode_keeps_browser_worker(self):
-        sid = f"unit-legacy-mode-{time.monotonic_ns()}"
-        try:
-            grok_adapter._sessions[sid] = {"_post_registration": {}}
-            with (
-                patch.object(grok_adapter._protocol_worker, "_run_registration") as protocol,
-                patch.object(grok_adapter._worker, "_run_registration") as browser,
-            ):
-                grok_adapter._run_registration(sid, "key", "proxy", object())
-
-            browser.assert_called_once()
-            protocol.assert_not_called()
-        finally:
-            grok_adapter._sessions.pop(sid, None)
-
-    def test_protocol_worker_uses_browser_device_allow_and_pipeline_queue(self):
-        source = (
-            BACKEND_DIR / "grok_registration" / "protocol_worker.py"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("XaiVisibleRegistration(", source)
-        self.assertIn("browser_session.open_authorization(", source)
-        self.assertIn("force_full_login=True", source)
-        self.assertIn("sso_to_token_with_browser(", source)
-        self.assertIn('"refresh_token"', source)
-        self.assertIn(".protocol-session.json", source)
-        self.assertNotIn("sso_to_direct_token", source)
-        self.assertNotIn("xai_oauth_login_protocol(", source)
-        self.assertNotIn("register_xai_account", source)
-        self.assertLess(
-            source.index('ctx._enqueue_pipeline_phase(sid, "probe")'),
-            source.index('ctx._enqueue_pipeline_phase(sid, "import")'),
+    def test_semi_protocol_worker_uses_natural_login_and_local_pkce(self):
+        source = (BACKEND_DIR / "grok_registration" / "protocol_worker.py").read_text(
+            encoding="utf-8"
         )
+
+        self.assertIn("browser_session.login_for_pkce(email, password)", source)
+        self.assertIn("authorize_and_exchange(", source)
+        self.assertIn("browser_session.authorize_pkce", source)
+        self.assertIn("browser_session.prepare_pkce_retry()", source)
+        self.assertIn("token_to_auth_payload(token, email=email)", source)
+        self.assertIn('"path": "semi_protocol_local_authorization_code_pkce"', source)
+        for forbidden in (
+            "authorize_device",
+            "sso_to_auth_json",
+            "fetch_sso_token",
+            "open_authorization",
+        ):
+            self.assertNotIn(forbidden, source)
+
+    def test_adapter_routes_protocol_sessions_to_semi_protocol_worker(self):
+        source = (BACKEND_DIR / "grok_build_adapter.py").read_text(encoding="utf-8")
+
+        self.assertIn("from grok_registration import protocol_worker", source)
+        self.assertIn('if mode == "protocol":', source)
+        self.assertIn("_protocol_worker._run_registration(", source)
+
+    def test_browser_worker_uses_local_pkce_for_sub2(self):
+        source = (BACKEND_DIR / "grok_registration" / "worker.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("from xai_pkce import (", source)
+        self.assertIn("authorize_and_exchange,", source)
+        self.assertIn("token_to_auth_payload,", source)
+        self.assertIn("browser_session.authorize_pkce", source)
+        self.assertIn('"path": "local_authorization_code_pkce"', source)
+        self.assertNotIn("create_grok_oauth_in_sub2api", source)
+        self.assertNotIn("authorize_sub2_oauth", source)
+
+    def test_browser_worker_uses_same_local_pkce_for_cpa(self):
+        source = (BACKEND_DIR / "grok_registration" / "worker.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("from xai_pkce import (", source)
+        self.assertIn("authorize_and_exchange,", source)
+        self.assertIn("token_to_auth_payload,", source)
+        self.assertIn("output_format = \"sub2api\" if output_target", source)
+        self.assertNotIn("create_grok_oauth_in_cpa", source)
+        self.assertNotIn("authorize_device", source)
+
+    def test_removed_xai_oauth_fallbacks_cannot_return(self):
+        forbidden_files = (
+            "sso_cli.py",
+            "sso_context.py",
+            "sso_device_flow.py",
+            "sso_storage.py",
+            "sso_to_auth_json.py",
+        )
+        for relative_path in forbidden_files:
+            with self.subTest(relative_path=relative_path):
+                self.assertFalse((BACKEND_DIR / relative_path).exists())
+
+        source = (BACKEND_DIR / "xai_browser.py").read_text(encoding="utf-8")
+        for symbol in (
+            "authorize_device",
+            "_authorization_code_from_page",
+            "_device_action_busy",
+            "authorize_sub2_oauth",
+        ):
+            with self.subTest(symbol=symbol):
+                self.assertNotIn(symbol, source)
 
     def test_grok_browser_registration_preserves_visible_mode(self):
         captured = {}
@@ -1308,13 +1257,47 @@ class XaiRegistrationConfigTests(unittest.TestCase):
 
         self.assertTrue(result["ok"])
         self.assertFalse(captured["headless"])
-        self.assertEqual(
-            captured["post_registration"]["registration_mode"], "browser"
-        )
+        self.assertEqual(captured["post_registration"]["registration_mode"], "browser")
         self.assertEqual(
             captured["hotmail_local_base_url"],
             settings.hotmail_local_base_url,
         )
+
+    def test_grok_semi_protocol_mode_reaches_registration_adapter(self):
+        captured = {}
+        saved = {}
+
+        class _Adapter:
+            def start_registration(self, **kwargs):
+                captured.update(kwargs)
+                return {"ok": True, "id": "gba_protocol_test"}
+
+        settings = app.Settings(
+            registration_target="grok",
+            registration_mode="protocol",
+            mail_provider="yyds",
+            count=1,
+            concurrency=1,
+            grok_headless=False,
+        )
+        with (
+            patch.object(app, "_get_registration_adapter", return_value=_Adapter()),
+            patch.object(app, "apply_environment"),
+            patch.object(app, "_sync_solver_proxy_file"),
+            patch.object(app, "load_config", return_value=dict(app.DEFAULT_CONFIG)),
+            patch.object(
+                app,
+                "save_config",
+                side_effect=lambda value: saved.update(value) or value,
+            ),
+        ):
+            result = app.start_register(settings)
+
+        self.assertTrue(result["ok"])
+        self.assertEqual(captured["registration_mode"], "browser")
+        self.assertEqual(captured["post_registration"]["registration_mode"], "browser")
+        self.assertEqual(saved["registration_mode"], "browser")
+        self.assertFalse(captured["headless"])
 
     def test_xai_browser_toggle_is_rendered(self):
         html = (BACKEND_DIR.parent / "web" / "static" / "index.html").read_text(
@@ -1327,7 +1310,7 @@ class XaiRegistrationConfigTests(unittest.TestCase):
         )
         self.assertNotIn('data-registration-mode="browser"', html)
 
-    def test_hybrid_protocol_mode_is_disabled_in_the_ui(self):
+    def test_semi_protocol_registration_mode_is_rendered_but_disabled(self):
         html = (BACKEND_DIR.parent / "web" / "static" / "index.html").read_text(
             encoding="utf-8"
         )
@@ -1338,7 +1321,7 @@ class XaiRegistrationConfigTests(unittest.TestCase):
         self.assertIn('<option value="protocol" disabled>半协议注册</option>', html)
         self.assertIn('<option value="browser" selected>浏览器注册</option>', html)
         self.assertIn("out.registration_mode='browser'", script)
-        self.assertIn("data={...data,registration_mode:'browser',mail_provider:", script)
+        self.assertIn("registration_mode:'browser'", script)
 
     def test_mail_provider_selector_only_exposes_custom_and_hotmail(self):
         html = (BACKEND_DIR.parent / "web" / "static" / "index.html").read_text(
@@ -1353,10 +1336,10 @@ class XaiRegistrationConfigTests(unittest.TestCase):
             '<option value="hotmail_local">微软邮箱账户池（本地助手）</option>',
             html,
         )
-        self.assertNotIn('>YYDS Mail</option>', html)
-        self.assertNotIn('>Stalwart 域名邮箱</option>', html)
+        self.assertNotIn(">YYDS Mail</option>", html)
+        self.assertNotIn(">Stalwart 域名邮箱</option>", html)
         self.assertNotIn('<option value="cloudflare_grokfree">', html)
-        self.assertNotIn('自定义（Cloudflare 邮箱）', html)
+        self.assertNotIn("自定义（Cloudflare 邮箱）", html)
         self.assertIn("function normalizeMailProvider", script)
 
     def test_chatgpt_download_format_is_disabled(self):
@@ -1406,8 +1389,11 @@ class XaiRegistrationConfigTests(unittest.TestCase):
         self.assertIn("注册数量（可用 ${hotmailAvailableCount}）", script)
         self.assertIn('<select name="concurrency">', html)
         self.assertIn('<option value="8">8</option>', html)
-        self.assertIn("并发数（最多 8）", script)
+        self.assertIn("并发数（最多 ${maxAllowed}）", script)
         self.assertIn("并发数不能大于注册数量", script)
+        self.assertIn("Math.min(maxAllowed", script)
+        self.assertIn("option.disabled=Number(option.value)>maxAllowed", script)
+        self.assertIn("out.concurrency=Math.min(8", script)
         self.assertIn("function hotmailVerificationHtml", script)
         self.assertIn("<span>验证码</span>", html)
         self.assertNotIn("count.readOnly=local", script)
@@ -1431,7 +1417,16 @@ class XaiRegistrationConfigTests(unittest.TestCase):
         }
         try:
             with (
-                patch("account_rotation.probe_registration_account", return_value={"ok": True, "available": True, "model": "grok-4.5", "status_code": 200, "reply": "hi"}),
+                patch(
+                    "account_rotation.probe_registration_account",
+                    return_value={
+                        "ok": True,
+                        "available": True,
+                        "model": "grok-4.5",
+                        "status_code": 200,
+                        "reply": "hi",
+                    },
+                ),
                 patch.object(grok_adapter, "wait_pipeline_stagger") as stagger,
                 patch.object(grok_adapter, "_enqueue_pipeline_phase") as enqueue,
             ):
@@ -1449,7 +1444,9 @@ class XaiRegistrationConfigTests(unittest.TestCase):
                 for item in grok_adapter._sessions[sid].get("events") or []
             ]
             self.assertTrue(any("测活上游请求" in item for item in messages))
-            self.assertTrue(any("测活上游回复" in item and "hi" in item for item in messages))
+            self.assertTrue(
+                any("测活上游回复" in item and "hi" in item for item in messages)
+            )
         finally:
             grok_adapter._sessions.pop(sid, None)
 
@@ -1505,7 +1502,9 @@ class XaiRegistrationConfigTests(unittest.TestCase):
         finally:
             grok_adapter._sessions.pop(sid, None)
 
-    def test_xai_registration_monitor_tracks_concurrent_sessions_without_stale_refresh(self):
+    def test_xai_registration_monitor_tracks_concurrent_sessions_without_stale_refresh(
+        self,
+    ):
         script = (BACKEND_DIR.parent / "web" / "static" / "app.js").read_text(
             encoding="utf-8"
         )
@@ -1519,8 +1518,12 @@ class XaiRegistrationConfigTests(unittest.TestCase):
             encoding="utf-8"
         )
 
-        self.assertIn("function currentRegistrationRound(batches=[],sessions=[])", script)
-        self.assertIn("function registrationHeaderStats(batches=[],sessions=[])", script)
+        self.assertIn(
+            "function currentRegistrationRound(batches=[],sessions=[])", script
+        )
+        self.assertIn(
+            "function registrationHeaderStats(batches=[],sessions=[])", script
+        )
         self.assertIn("renderRegistrationHeaderStats(batches,sessions)", script)
 
     def test_header_success_requires_local_at_rt_credential(self):
@@ -1538,39 +1541,6 @@ class XaiRegistrationConfigTests(unittest.TestCase):
             "Number(session.registration_succeeded_at||0)>0||session.session_file",
             script,
         )
-
-    def test_xai_oauth_consent_uses_browser_callback(self):
-        authorized = []
-        token = {"access_token": "access", "refresh_token": "refresh"}
-        device = {
-            "user_code": "ABC123",
-            "device_code": "device-token",
-            "verification_uri_complete": "https://auth.x.ai/device?code=ABC123",
-            "interval": 1,
-            "expires_in": 120,
-        }
-
-        with (
-            patch.object(sso_to_auth_json, "_acquire_device_flow_sequence_slot"),
-            patch.object(sso_to_auth_json, "_wait_device_flow_slot"),
-            patch.object(sso_to_auth_json, "request_device_code", return_value=device),
-            patch.object(
-                sso_to_auth_json, "poll_token", return_value=token
-            ) as poll_token,
-            patch.object(sso_to_auth_json._DEVICE_FLOW_SEQUENCE_SLOTS, "release"),
-        ):
-            result = sso_to_auth_json.sso_to_token_with_browser(
-                "sso-cookie",
-                lambda url, code: authorized.append((url, code)),
-                quiet=True,
-            )
-
-        self.assertEqual(result, token)
-        self.assertEqual(
-            authorized,
-            [("https://auth.x.ai/device?code=ABC123", "ABC123")],
-        )
-        self.assertFalse(poll_token.call_args.kwargs["immediate"])
 
     def test_grok_allows_hotmail_local_pool(self):
         captured = {}
@@ -1705,7 +1675,10 @@ class XaiImportPipelineTests(unittest.TestCase):
         try:
             with (
                 patch("model_health._load_record", return_value={"id": "account-1"}),
-                patch("account_pipeline.import_account", return_value={"ok": True, "status_code": 200}) as import_account,
+                patch(
+                    "account_pipeline.import_account",
+                    return_value={"ok": True, "status_code": 200},
+                ) as import_account,
                 patch.object(grok_adapter, "wait_pipeline_stagger") as stagger,
                 patch("account_rotation.record_imported_session"),
             ):
@@ -1714,6 +1687,43 @@ class XaiImportPipelineTests(unittest.TestCase):
             self.assertTrue(result["ok"])
             stagger.assert_not_called()
             import_account.assert_called_once()
+        finally:
+            grok_adapter._sessions.pop(sid, None)
+
+    def test_failed_import_event_includes_site_error(self):
+        sid = f"unit-import-error-{time.monotonic_ns()}"
+        grok_adapter._sessions[sid] = {
+            "id": sid,
+            "status": "import_queued",
+            "imported_account_ids": ["account-1"],
+            "_post_registration": {
+                "target": "sub2api",
+                "pre_import_probe_enabled": False,
+            },
+        }
+        try:
+            with (
+                patch("model_health._load_record", return_value={"id": "account-1"}),
+                patch(
+                    "account_pipeline.import_account",
+                    return_value={
+                        "ok": False,
+                        "status_code": 429,
+                        "error": "Sub2API 登录失败：Too many requests",
+                    },
+                ),
+            ):
+                result = grok_adapter._retry_import_now(sid, manual_retry=False)
+
+            self.assertFalse(result["ok"])
+            session = grok_adapter._sessions[sid]
+            self.assertIn("Too many requests", session["message"])
+            self.assertTrue(
+                any(
+                    "Too many requests" in str(item.get("message") or "")
+                    for item in session.get("events") or []
+                )
+            )
         finally:
             grok_adapter._sessions.pop(sid, None)
 

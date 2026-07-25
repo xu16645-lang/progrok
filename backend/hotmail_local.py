@@ -6,7 +6,7 @@ import re
 import threading
 import time
 import uuid
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -20,6 +20,12 @@ DEFAULT_HELPER_URL = "http://127.0.0.1:17373"
 # Each imported base account can register ALIAS_USES times:
 #   base@domain, base+1@domain, ..., base+(ALIAS_USES-1)@domain
 ALIAS_USES = 10
+try:
+    MAIL_HEALTH_TTL_SECONDS = max(
+        60, int(os.environ.get("HOTMAIL_HEALTH_TTL_SECONDS", "1800") or 1800)
+    )
+except (TypeError, ValueError):
+    MAIL_HEALTH_TTL_SECONDS = 1800
 _lock = threading.RLock()
 # account_id -> currently reserved plus-alias indices for in-flight tasks
 _reservations: dict[str, set[int]] = {}
@@ -261,11 +267,12 @@ def _drop_token_lock(account_id: str) -> None:
 def _code_fetch_top(account_id: str) -> int:
     """How many recent messages to fetch for verification codes.
 
-    Helper caps at 30. Use the full window so 10 concurrent plus-aliases plus
-    resends / unrelated mail do not push codes out of range.
+    Keep single-account polling light, then grow the window with active aliases
+    so concurrent plus-address registrations and resends remain covered.
     """
-    _ = account_id  # reserved for future dynamic sizing if helper limit grows
-    return 30
+    with _lock:
+        active_aliases = len(_reservations.get(str(account_id or ""), set()))
+    return max(10, min(30, active_aliases * 2 + 4))
 
 
 def _merge_duplicate_base_accounts(
@@ -422,6 +429,19 @@ def _load() -> list[dict[str, Any]]:
         return []
     accounts = [dict(item) for item in data if isinstance(item, dict)]
     merged, changed = _merge_duplicate_base_accounts(accounts)
+    now = time.time()
+    for item in merged:
+        if item.get("mail_healthy") is not True:
+            continue
+        try:
+            checked_at = float(item.get("mail_checked_at") or 0)
+        except (TypeError, ValueError):
+            checked_at = 0
+        if not checked_at or now - checked_at >= MAIL_HEALTH_TTL_SECONDS:
+            item["mail_healthy"] = None
+            item["mail_health_error"] = ""
+            item["mail_checked_at"] = None
+            changed = True
     if changed:
         # Persist one-time base-mailbox collapse for historical dual rows.
         try:
@@ -507,6 +527,7 @@ def import_accounts(text: str) -> dict[str, Any]:
                     "mail_healthy": None,
                     "mail_health_error": "",
                     "mail_checked_at": None,
+                    "preferred_for_next_use": False,
                 }
                 accounts.append(item)
                 by_email[base_email] = item
@@ -588,6 +609,7 @@ def list_accounts() -> dict[str, Any]:
                 "mail_healthy": item.get("mail_healthy") if isinstance(item.get("mail_healthy"), bool) else None,
                 "mail_health_error": str(item.get("mail_health_error") or ""),
                 "mail_checked_at": item.get("mail_checked_at"),
+                "preferred_for_next_use": item.get("preferred_for_next_use") is True,
                 "verification_entries": _verification_entries(account_id),
             })
     return {
@@ -601,6 +623,7 @@ def list_accounts() -> dict[str, Any]:
             for item in rows
             if not item["used"]
             and not item["failed"]
+            and not item["reserved"]
             and item["mail_healthy"] is not False
             and int(item.get("remaining_uses") or 0) > 0
         ),
@@ -613,18 +636,15 @@ def list_accounts() -> dict[str, Any]:
     }
 
 
-def reserve_account() -> dict[str, Any]:
-    """Reserve one plus-alias slot, spreading across physical mailboxes first.
-
-    Preference order:
-    1. Mailboxes with zero in-flight reservations (round-robin)
-    2. Then other free alias slots on already-busy mailboxes
-    """
+def reserve_account(*, exclude_account_ids: set[str] | None = None) -> dict[str, Any]:
+    """Reserve one plus-alias slot from an idle physical mailbox."""
     global _reserve_cursor
     with _lock:
         accounts = _load()
         if not accounts:
             raise RuntimeError("微软邮箱账户池没有可用账号，请先导入或恢复未用账号")
+
+        excluded = {str(value) for value in (exclude_account_ids or set())}
 
         def candidates(prefer_idle: bool) -> list[tuple[dict[str, Any], str, int]]:
             found: list[tuple[dict[str, Any], str, int]] = []
@@ -633,6 +653,8 @@ def reserve_account() -> dict[str, Any]:
                 item = accounts[(_reserve_cursor + offset) % total]
                 account_id = str(item.get("id") or "")
                 if not account_id:
+                    continue
+                if account_id in excluded:
                     continue
                 if not item.get("email") or not item.get("client_id") or not item.get("refresh_token"):
                     continue
@@ -644,11 +666,14 @@ def reserve_account() -> dict[str, Any]:
                 found.append((item, account_id, alias_index))
             return found
 
-        ordered = candidates(prefer_idle=True) or candidates(prefer_idle=False)
+        # Multiple plus aliases on one physical inbox only queue behind the
+        # same mailbox lock, so never assign that inbox to concurrent jobs.
+        ordered = candidates(prefer_idle=True)
         if not ordered:
             raise RuntimeError("微软邮箱账户池没有可用账号，请先导入或恢复未用账号")
 
-        item, account_id, alias_index = ordered[0]
+        preferred = next((row for row in ordered if row[0].get("preferred_for_next_use") is True), None)
+        item, account_id, alias_index = preferred or ordered[0]
         # Advance cursor past the chosen mailbox so the next reserve starts elsewhere.
         try:
             chosen_pos = next(
@@ -661,6 +686,9 @@ def reserve_account() -> dict[str, Any]:
             _reserve_cursor = (_reserve_cursor + 1) % max(1, len(accounts))
 
         _reservations.setdefault(account_id, set()).add(alias_index)
+        if item.get("preferred_for_next_use") is True:
+            item["preferred_for_next_use"] = False
+            _save(accounts)
         reserved = dict(item)
         reserved["email"] = base_mailbox_email(str(item.get("email") or ""))
         reserved["use_count"] = _normalize_use_count(item)
@@ -670,6 +698,25 @@ def reserve_account() -> dict[str, Any]:
         )
         reserved["base_email"] = base_mailbox_email(str(item.get("email") or ""))
         return reserved
+
+
+def set_preferred_account(account_id: str) -> bool:
+    """Select one mailbox for the next allocation only."""
+    account_id = str(account_id or "")
+    with _lock:
+        accounts = _load()
+        target = next(
+            (item for item in accounts if str(item.get("id") or "") == account_id),
+            None,
+        )
+        if target is None:
+            return False
+        if not _is_account_available(target, account_id=account_id):
+            raise RuntimeError("该邮箱当前不可用，无法指定使用")
+        for item in accounts:
+            item["preferred_for_next_use"] = str(item.get("id") or "") == account_id
+        _save(accounts)
+        return True
 
 
 def release_account(account_id: str, alias_index: int | None = None) -> None:
@@ -1068,25 +1115,118 @@ def probe_account(account_id: str, base_url: str | None = None) -> dict[str, Any
     }
 
 
-def probe_accounts(base_url: str | None = None, account_ids: list[str] | None = None) -> dict[str, Any]:
+def probe_accounts(
+    base_url: str | None = None,
+    account_ids: list[str] | None = None,
+    *,
+    should_cancel: Any | None = None,
+) -> dict[str, Any]:
     if account_ids is None:
         with _lock:
             account_ids = [str(item.get("id") or "") for item in _load() if item.get("id")]
     else:
         account_ids = [str(account_id or "") for account_id in account_ids if str(account_id or "")]
     results: list[dict[str, Any]] = []
-    with ThreadPoolExecutor(max_workers=min(4, max(1, len(account_ids)))) as pool:
-        futures = [pool.submit(probe_account, account_id, base_url) for account_id in account_ids]
-        for future in as_completed(futures):
-            results.append(future.result())
+    pool = ThreadPoolExecutor(max_workers=min(8, max(1, len(account_ids))))
+    pending = {
+        pool.submit(probe_account, account_id, base_url) for account_id in account_ids
+    }
+    cancelled = False
+    try:
+        while pending:
+            if callable(should_cancel) and should_cancel():
+                cancelled = True
+                break
+            done, pending = wait(pending, timeout=0.2, return_when=FIRST_COMPLETED)
+            for future in done:
+                results.append(future.result())
+    finally:
+        pool.shutdown(wait=not cancelled, cancel_futures=cancelled)
     passed = sum(1 for item in results if item.get("ok"))
     return {
-        "ok": passed == len(results),
+        "ok": not cancelled and passed == len(results),
+        "cancelled": cancelled,
         "total": len(results),
         "passed": passed,
         "failed": len(results) - passed,
         "results": results,
     }
+
+
+def ensure_healthy_accounts(
+    required: int,
+    base_url: str | None = None,
+    *,
+    should_cancel: Any | None = None,
+) -> dict[str, Any]:
+    """Preflight enough distinct physical mailboxes for one concurrency wave."""
+    required = max(1, int(required or 1))
+    checked: set[str] = set()
+    results: list[dict[str, Any]] = []
+    while True:
+        if callable(should_cancel) and should_cancel():
+            return {"ok": False, "cancelled": True, "healthy": 0, "results": results}
+        pool = list_accounts()
+        healthy = [
+            item
+            for item in pool.get("accounts", [])
+            if item.get("mail_healthy") is True
+            and not item.get("reserved")
+            and int(item.get("remaining_uses") or 0) > 0
+        ]
+        if len(healthy) >= required:
+            return {
+                "ok": True,
+                "healthy": len(healthy),
+                "required": required,
+                "results": results,
+            }
+        unchecked = [
+            str(item.get("id") or "")
+            for item in pool.get("accounts", [])
+            if item.get("mail_healthy") is None
+            and not item.get("reserved")
+            and not item.get("failed")
+            and int(item.get("remaining_uses") or 0) > 0
+            and str(item.get("id") or "") not in checked
+        ]
+        if not unchecked:
+            return {
+                "ok": bool(healthy),
+                "healthy": len(healthy),
+                "required": required,
+                "results": results,
+            }
+        needed = max(1, required - len(healthy))
+        wave = unchecked[: min(len(unchecked), needed + 2)]
+        checked.update(wave)
+        probed = probe_accounts(base_url, wave, should_cancel=should_cancel)
+        results.extend(probed.get("results") or [])
+        if probed.get("cancelled"):
+            return {
+                "ok": False,
+                "cancelled": True,
+                "healthy": 0,
+                "required": required,
+                "results": results,
+            }
+
+
+def reset_healthy_accounts() -> int:
+    """Return positively probed mailboxes to unchecked when the UI session closes."""
+    reset = 0
+    with _lock:
+        accounts = _load()
+        for item in accounts:
+            if item.get("mail_healthy") is not True:
+                continue
+            item["mail_healthy"] = None
+            item["mail_health_error"] = ""
+            item["mail_checked_at"] = None
+            reset += 1
+        if reset:
+            _save(accounts)
+    return reset
 
 
 class HotmailLocalReceiver:
@@ -1134,7 +1274,12 @@ class HotmailLocalReceiver:
             self.account_id, self.alias_index, self.email, "waiting"
         )
         deadline = time.time() + float(timeout or 120)
-        poll = max(1.0, min(float(poll_interval or 2.5), 4.0))
+        fixed_poll = (
+            max(1.0, min(float(poll_interval), 4.0))
+            if poll_interval is not None
+            else None
+        )
+        attempt = 0
         last_error = ""
         is_xai = self.verification_target == "xai"
         excluded = {str(code or "").strip() for code in (exclude_codes or set()) if str(code or "").strip()}
@@ -1236,6 +1381,8 @@ class HotmailLocalReceiver:
                     last_error = str(exc)
             finally:
                 token_lock.release()
+            attempt += 1
+            poll = fixed_poll or (1.0 if attempt <= 2 else 1.5 if attempt <= 5 else 2.5)
             slept = 0.0
             while slept < poll and time.time() < deadline:
                 if callable(should_cancel) and should_cancel():
@@ -1262,12 +1409,39 @@ def create_receiver(
     base_url: str | None = None,
     *,
     verification_target: str = "chatgpt",
+    should_cancel: Any | None = None,
 ) -> tuple[str, HotmailLocalReceiver]:
-    account = reserve_account()
-    receiver = HotmailLocalReceiver(
-        account,
-        base_url,
-        verification_target=verification_target,
-    )
-    # Return the plus-alias used for signup; inbox reads still hit the base mailbox.
-    return receiver.email, receiver
+    attempted: set[str] = set()
+    probe_errors: list[str] = []
+    while True:
+        if callable(should_cancel):
+            should_cancel()
+        try:
+            account = reserve_account(exclude_account_ids=attempted)
+        except RuntimeError as exc:
+            if probe_errors:
+                raise RuntimeError(
+                    "微软邮箱池没有通过入队前测活的可用邮箱：" + "；".join(probe_errors[-3:])
+                ) from exc
+            raise
+        account_id = str(account.get("id") or "")
+        alias_index = _coerce_alias_index(account.get("alias_index"))
+        if account.get("mail_healthy") is not True:
+            result = probe_account(account_id, base_url)
+            if callable(should_cancel):
+                should_cancel()
+            if not result.get("ok"):
+                release_account(account_id, alias_index=alias_index)
+                attempted.add(account_id)
+                probe_errors.append(
+                    f"{account.get('email') or account_id}: {result.get('error') or '测活失败'}"
+                )
+                continue
+            account["mail_healthy"] = True
+        receiver = HotmailLocalReceiver(
+            account,
+            base_url,
+            verification_target=verification_target,
+        )
+        # Return the plus-alias used for signup; inbox reads still hit the base mailbox.
+        return receiver.email, receiver

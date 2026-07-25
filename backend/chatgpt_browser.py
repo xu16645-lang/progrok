@@ -12,16 +12,10 @@ Supports proxy, cancellation, and error handling.
 
 from __future__ import annotations
 
-import json
-import os
 import random
 import re
-import secrets
-import string
 import time
-import traceback
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 from typing import Any, Callable
 from urllib.parse import urlparse
 

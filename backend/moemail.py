@@ -5,7 +5,7 @@ from typing import Any
 
 import httpx
 
-from mail_protocols.common import (
+from mail_protocols.common import (  # noqa: F401 - compatibility facade
     CFMAIL_DEFAULT_BASE_URL,
     GPTMAIL_DEFAULT_BASE_URL,
     GPTMAIL_PUBLIC_TEST_KEY,
@@ -35,14 +35,14 @@ from mail_protocols.common import (
     normalize_yyds_base_url,
     secrets_token_hex_local,
 )
-from mail_protocols.cfmail import (
+from mail_protocols.cfmail import (  # noqa: F401 - compatibility facade
     _cfmail_parse_raw_rfc822,
     cfmail_create_mailbox,
     cfmail_fetch_messages,
     cfmail_list_domains,
     cfmail_pick_domain,
 )
-from mail_protocols.gptmail import (
+from mail_protocols.gptmail import (  # noqa: F401 - compatibility facade
     gptmail_create_mailbox,
     gptmail_fetch_messages,
     gptmail_pick_domain,
@@ -50,7 +50,7 @@ from mail_protocols.gptmail import (
 from mail_protocols.imap_mail import imap_create_mailbox, imap_fetch_messages
 from mail_protocols.moemail import moemail_create_mailbox, moemail_fetch_messages
 from mail_protocols.stalwart import stalwart_create_mailbox, stalwart_fetch_messages
-from mail_protocols.yyds import (
+from mail_protocols.yyds import (  # noqa: F401 - compatibility facade
     yyds_create_mailbox,
     yyds_fetch_messages,
     yyds_list_domains,
