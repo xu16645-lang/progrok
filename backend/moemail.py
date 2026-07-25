@@ -47,6 +47,7 @@ from mail_protocols.gptmail import (
     gptmail_fetch_messages,
     gptmail_pick_domain,
 )
+from mail_protocols.imap_mail import imap_create_mailbox, imap_fetch_messages
 from mail_protocols.moemail import moemail_create_mailbox, moemail_fetch_messages
 from mail_protocols.stalwart import stalwart_create_mailbox, stalwart_fetch_messages
 from mail_protocols.yyds import (
@@ -76,6 +77,17 @@ def create_mailbox(
 ) -> dict[str, Any]:
     """Provider-aware mailbox creation."""
     prov = normalize_mail_provider(provider, base_url=base_url)
+    if prov == "imap":
+        return imap_create_mailbox(
+            name=name,
+            domain=domain,
+            expiry_ms=expiry_ms,
+            api_key=api_key,
+            base_url=base_url,
+            proxy=proxy,
+            proxy_username=proxy_username,
+            proxy_password=proxy_password,
+        )
     if prov == "stalwart":
         return stalwart_create_mailbox(
             name=name,
@@ -146,6 +158,15 @@ def fetch_messages(
 ) -> list[dict[str, Any]]:
     """Provider-aware message list."""
     prov = normalize_mail_provider(provider, base_url=base_url)
+    if prov == "imap":
+        return imap_fetch_messages(
+            email_id,
+            api_key=api_key,
+            base_url=base_url,
+            include_details=include_details,
+            address=address,
+            token=token,
+        )
     if prov == "stalwart":
         return stalwart_fetch_messages(
             email_id,

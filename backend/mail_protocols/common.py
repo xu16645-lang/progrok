@@ -42,10 +42,16 @@ def normalize_mail_provider(provider: str | None, *, base_url: str | None = None
     Infer from base_url when provider is empty.
     """
     p = (provider or "").strip().lower()
+    base = (base_url or "").strip().lower()
+    if p in {"imap", "imaps", "imap_mail", "imap-mail"}:
+        return "imap"
     if p in {"yyds", "yydsmail", "yyds_mail", "vip215", "215", "maliapi"}:
         return "yyds"
     if p in {"custom", "selfhosted", "self-hosted", "自定义"}:
-        return "cfmail"
+        # The custom provider is protocol-driven. Existing HTTP deployments
+        # keep using the CF Temp Email adapter, while standard mail servers
+        # can be connected directly through IMAP.
+        return "imap" if base.startswith(("imap://", "imaps://")) else "cfmail"
     if p in {"cloudflare_grokfree", "grokfree"}:
         return "cfmail"
     if p in {
@@ -74,7 +80,8 @@ def normalize_mail_provider(provider: str | None, *, base_url: str | None = None
         return "moemail"
     if p in {"stalwart", "stalwart_mail", "stalwart-mail"}:
         return "stalwart"
-    base = (base_url or "").strip().lower()
+    if base.startswith(("imap://", "imaps://")):
+        return "imap"
     if any(x in base for x in ("maliapi.215.im", "vip.215.im", "215.im/v1", "yyds")):
         return "yyds"
     if any(
