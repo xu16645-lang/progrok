@@ -1,3 +1,6 @@
+
+
+<img width="1284" height="2283" alt="qq群" src="https://github.com/user-attachments/assets/4822c8bc-d784-460c-a19b-8007aea4b070" />
 # ProGrok 浏览器注册工具
 
 ProGrok 是面向 Windows 的本地 Web 工具，用于执行 Grok（xAI）浏览器注册、微软/自定义邮箱接码、账号凭证保存、账号探活以及 CPA/Sub2API 导入。服务默认只监听 `127.0.0.1`。
